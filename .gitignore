@@ -6,3 +6,4 @@ grafo/santiago_routing_graph.graphml
 EDA/Geodatos/
 *.ipynb
 __pycache__
+*.html

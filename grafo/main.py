@@ -1,7 +1,7 @@
 import pandas as pd
 import os
-from network_builder import get_santiago_graph
-from routing import calculate_routing_for_day
+from .network_builder import get_santiago_graph
+from .routing import calculate_routing_for_day
 
 def process_daily_routing(df_dia: pd.DataFrame, graph_filepath: str = 'santiago_routing_graph.graphml'):
     """
