@@ -11,6 +11,20 @@ ctx.check_hostname = False
 ctx.verify_mode = ssl.CERT_NONE
 geopy.geocoders.options.default_ssl_context = ctx
 
+def geocode_depot(address: str):
+    """
+    Recibe la dirección del depósito y la geocodifica usando ArcGIS.
+    Retorna una tupla (latitud, longitud).
+    """
+    geolocator = ArcGIS(user_agent="capstone_analytics_vrp", adapter_factory=URLLibAdapter)
+    print(f"Geocodificando depósito: {address}...")
+    location = geolocator.geocode(address)
+    if location:
+        print(f"Depósito localizado en: ({location.latitude}, {location.longitude})")
+        return location.latitude, location.longitude
+    else:
+        raise ValueError(f"No se pudo encontrar la dirección del depósito: {address}")
+
 def geocode_orders(df: pd.DataFrame, address_col: str = 'direccion_ruteo') -> pd.DataFrame:
     """
     Recibe un DataFrame, y para cada fila obtiene la latitud y longitud 
