@@ -5,3 +5,4 @@ grafo/santiago_routing_graph.graphml
 # Evitar archivos pesados de datos y notebooks con outputs
 EDA/Geodatos/
 *.ipynb
+__pycache__
