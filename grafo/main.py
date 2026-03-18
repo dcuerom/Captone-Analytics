@@ -11,7 +11,7 @@ def process_daily_routing(df_dia: pd.DataFrame, graph_filepath: str = 'santiago_
     - Rut / RUT
     - Número de orden
     - fecha de despacho
-    - latitudp
+    - latitud
     - longitud
     - volumen total_m3 / volumen_total_m3
     - peso_total_kg
