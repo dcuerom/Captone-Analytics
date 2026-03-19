@@ -1,6 +1,7 @@
 import osmnx as ox
 import networkx as nx
 import folium
+import pandas as pd
 from typing import Dict, Any, Optional
 
 def plot_network_and_routes(
