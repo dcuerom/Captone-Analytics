@@ -1,1 +1,0 @@
-Usar shp de Comunas como ruta para el archivo de capstone
