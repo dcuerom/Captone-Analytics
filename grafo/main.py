@@ -1,10 +1,10 @@
 import pandas as pd
 import os
-from grafo.geocoder import geocode_orders, geocode_depot
-from grafo.network_builder import get_santiago_graph
-from grafo.clustering import run_clustering_pipeline
-from grafo.routing import calculate_routing_for_day
-from grafo.visualizer import plot_cluster_results
+from geocoder import geocode_orders, geocode_depot
+from network_builder import get_santiago_graph
+from clustering import run_clustering_pipeline
+from routing import calculate_routing_for_day
+from visualizer import plot_cluster_results
 
 def clean_rut(rut) -> str:
     if pd.isna(rut):
@@ -43,7 +43,7 @@ def execute_vrp_pipeline(
     
     if sample_size and len(df) > sample_size:
         print(f"Tomando una muestra aleatoria de {sample_size} pedidos para la ejecución...")
-        df = df.sample(n=sample_size, random_state=42).copy()
+        df = df.sample(n=sample_size, random_state=50).copy()
     else:
         print(f"Procesando {len(df)} pedidos totales...")
     
