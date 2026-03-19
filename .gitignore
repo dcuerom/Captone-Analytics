@@ -7,3 +7,5 @@ EDA/Geodatos/
 *.ipynb
 __pycache__
 *.html
+*.graphml
+*.json
