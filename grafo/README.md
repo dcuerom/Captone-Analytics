@@ -286,3 +286,71 @@ El archivo `santiago_routing_graph.graphml` se comprime con **GZIP** para eludir
 ### Escalabilidad
 
 El parámetro `sample_size` en `execute_vrp_pipeline` permite reducir el conjunto de pedidos para pruebas rápidas. A* sobre grafos viales reales es costoso: para 1000+ clientes sin clustering, el tiempo de cómputo se vuelve inviable. El Cluster-First lo hace lineal en el número de clusters.
+
+---
+
+## 🔍 Estructura de Salida: Una Ruta A*
+
+El diccionario `rutas_por_cluster` retornado por `execute_vrp_pipeline` mapea cada par origen→destino a su información de ruta. Cada entrada tiene la siguiente forma:
+
+```python
+'DEPOT_01_BASE->ORD-CL-202612-001037_6283572    5': {
+    'distancia_km': 12.289,
+    'ruta_nodos_osmnx': [11057674695, 11057674694, 6956627860, ...]
+}
+```
+
+### Anatomía de la clave
+
+```
+DEPOT_01_BASE  ->  ORD-CL-202612-001037_6283572    5
+     │          │            │                  │
+  Origen     Flecha       id_nodo            Índice de
+ (Depósito)  Dirigida     cliente            permutación
+```
+
+| Parte | Ejemplo | Origen |
+|---|---|---|
+| Nodo origen | `DEPOT_01_BASE` | `depot_id` definido en `main.py` |
+| `->` | literal | Indica arista **dirigida** en el grafo |
+| Número de orden | `ORD-CL-202612-001037` | Columna `Número de orden` del Excel |
+| RUT limpio | `_6283572` | Resultado de `clean_rut()` |
+| Índice | `5` | Posición en la lista de `permutations()` del cluster |
+
+El `id_nodo` se construye en `main.py` como:
+```python
+id_nodo = f"{Número_de_orden}_{rut_clean}"
+```
+
+### Campo `distancia_km`
+
+Distancia **real en kilómetros** calculada por A* sobre el grafo vial de Santiago. No es distancia euclidiana: respeta sentidos de circulación, restricciones viales y la topología real de las calles.
+
+### Campo `ruta_nodos_osmnx`
+
+Lista ordenada de **IDs de nodos OSMnx** (enteros), que representan intersecciones reales del mapa de OpenStreetMap. Define la secuencia exacta de intersecciones que A* atravesó desde el origen hasta el destino:
+
+```
+[11057674695] → [11057674694] → [6956627860] → ... → [2355936038]
+   Partida                                              Llegada
+  (próximo al                                         (próximo al
+    depósito)                                           cliente)
+```
+
+> Una ruta de ~12 km en zona urbana de Santiago puede involucrar **~190 nodos intermedios** dada la alta densidad de intersecciones.
+
+`plot_network_and_routes` en `visualizer.py` consume esta lista para extraer la geometría real de cada segmento de calle y dibujar la `PolyLine` en el mapa HTML interactivo.
+
+### Rol dentro del pipeline
+
+```
+generate_astar_inputs()
+    └── permutations([DEPOT, A, B, C])
+            → (DEPOT→A), (DEPOT→B), (A→DEPOT), ...
+
+calculate_routing_for_day()
+    └── Para cada par → corre A* en el grafo G
+            → { "DEPOT→A": { distancia_km, ruta_nodos_osmnx }, ... }
+```
+
+El conjunto de todas estas entradas conforma la **matriz de adyacencia real** del cluster, donde cada celda representa el costo verdadero (en km de calle) de ir de un nodo a otro. Esta matriz es el insumo para resolver el ordenamiento óptimo de visitas (TSP/VRP) dentro de cada grupo.
