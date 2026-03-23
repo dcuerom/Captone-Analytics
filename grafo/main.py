@@ -12,7 +12,7 @@ def clean_rut(rut) -> str:
     return str(rut).replace('.', '').replace('-', '').strip().upper()
 
 def execute_vrp_pipeline(
-    input_file: str = 'EDA/vrp_orders.xlsx', 
+    input_file: str = None, 
     depot_address: str = "Plaza de Armas, Santiago, Chile",
     sample_size: int = None
 ):
@@ -20,6 +20,10 @@ def execute_vrp_pipeline(
     Gran instancia principal: Ejecuta toda la lógica de formación para el grafo dirigido
     combinando Cluster-First + Route-Second con llamadas optimizadas a A*.
     """
+    if input_file is None:
+        base_dir = os.path.dirname(os.path.abspath(__file__))
+        input_file = os.path.join(os.path.dirname(base_dir), 'EDA', 'vrp_orders.xlsx')
+
     print("=== INICIANDO PIPELINE VRP COMPLETO ===")
     
     # 1. Carga de datos
