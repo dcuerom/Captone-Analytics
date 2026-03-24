@@ -35,15 +35,15 @@ import pandas as pd
 # Constantes del horizonte de planificación
 # ---------------------------------------------------------------------------
 
-Z_0 = 9.0    # Hora de inicio del horizonte (09:00)
-Z_K = 21.0   # Hora de fin del horizonte   (21:00)
-K   = 13     # Número de intervalos Z_k
+Z_0 = 540.0    # Hora de inicio del horizonte (09:00 = 9 * 60 min)
+Z_K = 1260.0   # Hora de fin del horizonte   (21:00 = 21 * 60 min)
+K   = 13       # Número de intervalos Z_k
 
 # Breakpoints z_k para k = 0, 1, ..., K  (14 puntos delimitan 13 intervalos)
-Z_BREAKPOINTS = np.linspace(Z_0, Z_K, K + 1)   # [9, 10, 11, ..., 21]
+Z_BREAKPOINTS = np.linspace(Z_0, Z_K, K + 1)   # [540, 600, 660, ..., 1260]
 
-# Parámetro δ de suavizado en la linealización (en horas)
-DELTA_DEFAULT = 0.25
+# Parámetro δ de suavizado en la linealización (en minutos)
+DELTA_DEFAULT = 15.0
 
 # ---------------------------------------------------------------------------
 # Matriz de velocidades por hora y día de semana (km/h)
@@ -81,7 +81,8 @@ SPEED_TABLE_KMH = np.array([
 ], dtype=float)
 
 # Velocidades sólo para los K intervalos del horizonte [09:00, 21:00)
-_SPEED_HORIZON = SPEED_TABLE_KMH[int(Z_0): int(Z_0) + K, :]   # shape (13, 7)
+# Como Z_0 ahora es 540, para obtener el índice de fila (hora 9) dividimos por 60
+_SPEED_HORIZON = SPEED_TABLE_KMH[int(Z_0 / 60): int(Z_0 / 60) + K, :]   # shape (13, 7)
 
 
 # ---------------------------------------------------------------------------
@@ -116,12 +117,12 @@ def tau_minimo(distancia_km: float, k: int, dia_semana: int) -> float:
     Calcula τ_ijk = tiempo mínimo de viaje para una distancia dada en el intervalo k.
     Se asume velocidad constante dentro del intervalo.
 
-    τ_ijk = distancia_ij / velocidad_k  [horas]
+    τ_ijk = (distancia_ij / velocidad_k) * 60  [minutos]
     """
     v = velocidad_para_intervalo(k, dia_semana)
     if v == 0.0:
         return float('inf')
-    return distancia_km / v
+    return (distancia_km / v) * 60.0
 
 
 def tau_ij(distancia_km: float, t: float, dia_semana: int, delta: float = DELTA_DEFAULT) -> float:
@@ -148,15 +149,15 @@ def tau_ij(distancia_km: float, t: float, dia_semana: int, delta: float = DELTA_
     distancia_km : float
         Distancia de la ruta i→j en km (salida de `calculate_routing_for_day`).
     t : float
-        Hora de partida escalar (horas desde medianoche). Ej: 9.5 = 09:30.
+        Hora de partida escalar en minutos desde medianoche. Ej: 570 = 09:30.
     dia_semana : int
         Día de la semana (0=Lunes, …, 6=Domingo).
     delta : float, opcional
-        Parámetro de suavizado δ en horas (default = 0.25 h).
+        Parámetro de suavizado δ en minutos (default = 15.0 min).
 
     Retorna
     -------
-    float : tiempo de viaje estimado en horas.
+    float : tiempo de viaje estimado en minutos.
     """
     if distancia_km == 0.0:
         return 0.0
@@ -260,9 +261,9 @@ def tau_ij_vec(
     k_idx = np.clip(k_idx, 0, K - 1).astype(int)
     k_1indexed = k_idx + 1   # 1-indexado para la tabla de velocidades
 
-    # τ_ijk para el intervalo activo de cada muestra
+    # τ_ijk para el intervalo activo de cada muestra (convertido a minutos)
     v_k  = speeds[k_idx]                        # shape igual a t_arr
-    tau_k_arr = np.where(v_k > 0, d / v_k, np.inf)
+    tau_k_arr = np.where(v_k > 0, (d / v_k) * 60.0, np.inf)
 
     z_prev_arr = Z_BREAKPOINTS[k_idx]           # z_{k-1} para cada muestra
     z_curr_arr = Z_BREAKPOINTS[np.minimum(k_idx + 1, K)]  # z_k para cada muestra
@@ -275,7 +276,7 @@ def tau_ij_vec(
     if np.any(in_right):
         k_next_idx = np.minimum(k_idx + 1, K - 1)
         v_k1 = speeds[k_next_idx]
-        tau_k1_arr = np.where(v_k1 > 0, d / v_k1, np.inf)
+        tau_k1_arr = np.where(v_k1 > 0, (d / v_k1) * 60.0, np.inf)
         dr = delta_right
         s = np.where(dr > 0, (tau_k1_arr - tau_k_arr) / (2.0 * dr), 0.0)
         result = np.where(in_right,
@@ -290,7 +291,7 @@ def tau_ij_vec(
     if np.any(in_left):
         k_prev_idx = np.maximum(k_idx - 1, 0)
         v_kp = speeds[k_prev_idx]
-        tau_kp_arr = np.where(v_kp > 0, d / v_kp, np.inf)
+        tau_kp_arr = np.where(v_kp > 0, (d / v_kp) * 60.0, np.inf)
         dl = delta_left
         s = np.where(dl > 0, (tau_k_arr - tau_kp_arr) / (2.0 * dl), 0.0)
         result = np.where(in_left,
