@@ -6,6 +6,53 @@ from typing import Dict, List, Sequence, Tuple
 import numpy as np
 from pymoo.core.problem import ElementwiseProblem
 
+try:
+    # Ejecutando como paquete: python -m modelo.prueba
+    from .funciones import DELTA_DEFAULT, Z_0, tau_ij_vec
+except ImportError:
+    # Ejecutando como script: python modelo/prueba.py
+    from funciones import DELTA_DEFAULT, Z_0, tau_ij_vec
+
+
+def build_travel_time_tensor_from_distance(
+    distance_ij: np.ndarray,
+    z_t: np.ndarray,
+    dia_semana: int,
+    delta: float = DELTA_DEFAULT,
+) -> np.ndarray:
+    """
+    Construye T_tij en minutos usando tau_ij_vec (Fleischmann) para cada intervalo t.
+
+    Convención:
+    - z_t se interpreta como offset horario desde Z_0 (por ejemplo 0,1,2,...).
+    - Hora real del intervalo t = Z_0 + z_t[t].
+    """
+    distance_ij = np.asarray(distance_ij, dtype=float)
+    z_t = np.asarray(z_t, dtype=float)
+
+    if distance_ij.ndim != 2 or distance_ij.shape[0] != distance_ij.shape[1]:
+        raise ValueError("distance_ij debe tener forma (N, N).")
+
+    n_nodes = distance_ij.shape[0]
+    t_count = z_t.shape[0]
+    travel_time_tij = np.zeros((t_count, n_nodes, n_nodes), dtype=float)
+
+    flat_dist = distance_ij.reshape(-1)
+    for t_idx, z_value in enumerate(z_t):
+        departure_hour = float(Z_0 + z_value)
+        departure_vec = np.full_like(flat_dist, departure_hour, dtype=float)
+        travel_hours = tau_ij_vec(
+            distancia_km=flat_dist,
+            t=departure_vec,
+            dia_semana=dia_semana,
+            delta=delta,
+        )
+        travel_minutes = (travel_hours * 60.0).reshape(n_nodes, n_nodes)
+        np.fill_diagonal(travel_minutes, 0.0)
+        travel_time_tij[t_idx] = travel_minutes
+
+    return travel_time_tij
+
 
 @dataclass
 class TDVRPTWData:
@@ -19,7 +66,6 @@ class TDVRPTWData:
     """
 
     cost_ij: np.ndarray
-    travel_time_tij: np.ndarray
     demand_volume_i: np.ndarray
     demand_mass_i: np.ndarray
     cap_volume_k: np.ndarray
@@ -30,6 +76,10 @@ class TDVRPTWData:
     service_fixed: float
     z_t: np.ndarray
     dmax_k: np.ndarray | float
+    travel_time_tij: np.ndarray | None = None
+    distance_ij: np.ndarray | None = None
+    dia_semana: int = 0
+    delta_fleischmann: float = DELTA_DEFAULT
     k11: Sequence[int] = field(default_factory=list)
     k12: Sequence[int] = field(default_factory=list)
     k21: Sequence[int] = field(default_factory=list)
@@ -39,14 +89,20 @@ class TDVRPTWData:
     volume_factor: float = 0.8
 
     def validate(self) -> None:
+        self.cost_ij = np.asarray(self.cost_ij, dtype=float)
+        self.demand_volume_i = np.asarray(self.demand_volume_i, dtype=float)
+        self.demand_mass_i = np.asarray(self.demand_mass_i, dtype=float)
+        self.cap_volume_k = np.asarray(self.cap_volume_k, dtype=float)
+        self.cap_mass_k = np.asarray(self.cap_mass_k, dtype=float)
+        self.a_i = np.asarray(self.a_i, dtype=float)
+        self.b_i = np.asarray(self.b_i, dtype=float)
+        self.service_var_i = np.asarray(self.service_var_i, dtype=float)
+        self.z_t = np.asarray(self.z_t, dtype=float)
+
         n_nodes = self.cost_ij.shape[0]
 
         if self.cost_ij.shape != (n_nodes, n_nodes):
             raise ValueError("cost_ij debe tener forma (N, N).")
-        if self.travel_time_tij.ndim != 3:
-            raise ValueError("travel_time_tij debe tener forma (T, N, N).")
-        if self.travel_time_tij.shape[1:] != (n_nodes, n_nodes):
-            raise ValueError("travel_time_tij debe tener forma (T, N, N).")
         if self.demand_volume_i.shape[0] != n_nodes:
             raise ValueError("demand_volume_i debe tener largo N.")
         if self.demand_mass_i.shape[0] != n_nodes:
@@ -59,6 +115,30 @@ class TDVRPTWData:
             raise ValueError("service_var_i debe tener largo N.")
         if self.cap_volume_k.shape[0] != self.cap_mass_k.shape[0]:
             raise ValueError("cap_volume_k y cap_mass_k deben tener igual largo K.")
+        if not (0 <= int(self.dia_semana) <= 6):
+            raise ValueError("dia_semana debe estar entre 0 (Lunes) y 6 (Domingo).")
+
+        if self.travel_time_tij is None:
+            if self.distance_ij is None:
+                raise ValueError(
+                    "Debes entregar travel_time_tij o distance_ij para construir T_tij."
+                )
+            self.distance_ij = np.asarray(self.distance_ij, dtype=float)
+            if self.distance_ij.shape != (n_nodes, n_nodes):
+                raise ValueError("distance_ij debe tener forma (N, N).")
+            self.travel_time_tij = build_travel_time_tensor_from_distance(
+                distance_ij=self.distance_ij,
+                z_t=self.z_t,
+                dia_semana=self.dia_semana,
+                delta=self.delta_fleischmann,
+            )
+        else:
+            self.travel_time_tij = np.asarray(self.travel_time_tij, dtype=float)
+
+        if self.travel_time_tij.ndim != 3:
+            raise ValueError("travel_time_tij debe tener forma (T, N, N).")
+        if self.travel_time_tij.shape[1:] != (n_nodes, n_nodes):
+            raise ValueError("travel_time_tij debe tener forma (T, N, N).")
         if self.z_t.shape[0] != self.travel_time_tij.shape[0]:
             raise ValueError("z_t debe tener largo T.")
 
@@ -91,13 +171,13 @@ class TDVRPTWProblem(ElementwiseProblem):
     """
 
     def __init__(self, data: TDVRPTWData):
-        self.data = data
-        self.data.validate()
+        self.instance = data
+        self.instance.validate()
 
-        self.k_count = int(self.data.cap_volume_k.shape[0])
-        self.t_count = int(self.data.travel_time_tij.shape[0])
-        self.n_nodes = int(self.data.cost_ij.shape[0])
-        self.depot = int(self.data.depot_index)
+        self.k_count = int(self.instance.cap_volume_k.shape[0])
+        self.t_count = int(self.instance.travel_time_tij.shape[0])
+        self.n_nodes = int(self.instance.cost_ij.shape[0])
+        self.depot = int(self.instance.depot_index)
         self.customers = [i for i in range(self.n_nodes) if i != self.depot]
 
         self.n_x = self.k_count * self.t_count * self.n_nodes * self.n_nodes
@@ -131,10 +211,10 @@ class TDVRPTWProblem(ElementwiseProblem):
         return x_bin, ts
 
     def _compute_ts_upper_bound(self) -> float:
-        latest_window = float(np.max(self.data.b_i))
-        latest_interval_end = float(np.max(540 + 60 * self.data.z_t))
+        latest_window = float(np.max(self.instance.b_i))
+        latest_interval_end = float(np.max(540 + 60 * self.instance.z_t))
         max_departure = 1020.0
-        extra = float(np.max(self.data.service_var_i) + self.data.service_fixed + np.max(self.data.travel_time_tij))
+        extra = float(np.max(self.instance.service_var_i) + self.instance.service_fixed + np.max(self.instance.travel_time_tij))
         return max(latest_window, latest_interval_end, max_departure) + extra
 
     def _count_constraints(self) -> int:
@@ -142,7 +222,7 @@ class TDVRPTWProblem(ElementwiseProblem):
         t = self.t_count
         n = self.n_nodes
         c = len(self.customers)
-        grouped_trucks = sum(len(group) for group in self.data.truck_groups.values())
+        grouped_trucks = sum(len(group) for group in self.instance.truck_groups.values())
 
         # Todas expresadas como G <= 0; igualdades se modelan con +/- expresión.
         count = 0
@@ -162,7 +242,7 @@ class TDVRPTWProblem(ElementwiseProblem):
 
     def _evaluate(self, x: np.ndarray, out: dict, *args, **kwargs) -> None:
         x_bin, ts = self.decode_solution(x)
-        d = self.data
+        d = self.instance
         g: List[float] = []
 
         # Objetivo: min sum_k sum_t sum_i sum_j x_(i,t,j),k * C_ij
@@ -281,14 +361,10 @@ def build_toy_tdvrptw_data(
     rng = np.random.default_rng(seed)
     n_nodes = n_customers + 1  # + depósito
 
-    base_cost = rng.integers(5, 30, size=(n_nodes, n_nodes)).astype(float)
-    np.fill_diagonal(base_cost, 0.0)
-
-    travel_time = np.zeros((n_intervals, n_nodes, n_nodes), dtype=float)
-    for t in range(n_intervals):
-        congestion_factor = 1.0 + 0.15 * t
-        travel_time[t] = base_cost * congestion_factor
-        np.fill_diagonal(travel_time[t], 0.0)
+    distance_km = rng.uniform(1.0, 18.0, size=(n_nodes, n_nodes)).astype(float)
+    np.fill_diagonal(distance_km, 0.0)
+    # Costo base del arco: aquí se asimila a distancia (puedes cambiarlo por costo monetario real).
+    base_cost = distance_km.copy()
 
     demand_volume = np.zeros(n_nodes, dtype=float)
     demand_mass = np.zeros(n_nodes, dtype=float)
@@ -306,7 +382,7 @@ def build_toy_tdvrptw_data(
     service_var = np.zeros(n_nodes, dtype=float)
     service_var[1:] = rng.integers(5, 20, size=n_customers)
 
-    z_t = np.arange(n_intervals, dtype=float)
+    z_t = np.arange(n_intervals, dtype=float)  # 0,1,2,... -> 09:00, 10:00, ...
     dmax = np.full(n_trucks, 480.0, dtype=float)
 
     # Reparto simple de camiones por turnos/rutas.
@@ -316,7 +392,9 @@ def build_toy_tdvrptw_data(
 
     return TDVRPTWData(
         cost_ij=base_cost,
-        travel_time_tij=travel_time,
+        distance_ij=distance_km,
+        dia_semana=0,
+        delta_fleischmann=DELTA_DEFAULT,
         demand_volume_i=demand_volume,
         demand_mass_i=demand_mass,
         cap_volume_k=cap_volume,

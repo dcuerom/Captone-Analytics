@@ -1,6 +1,9 @@
 capstone 
 cache
 .env
+.venv/
+.tmp/
+.pydeps/
 grafo/santiago_routing_graph.graphml
 EDA/Geodatos/
 *.ipynb
