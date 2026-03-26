@@ -22,7 +22,7 @@ from modelo.funciones.tiempos_viaje import tau_ij_vec
 class TDVRPTWProblem(ElementwiseProblem):
     def __init__(self, df_cluster, matriz_dist_m, depot_id, 
                  t_inicio=540.0, cap_vol_cm3=10_000_000, cap_peso_g=5_000_000, 
-                 dia_semana=0, factor_s=1.2):
+                 dia_semana=0, factor_s=1.2, d_max_min=300.0):
         
         self.df_cluster = df_cluster.copy()
         
@@ -54,7 +54,8 @@ class TDVRPTWProblem(ElementwiseProblem):
         self.cap_peso_g = cap_peso_g
         self.dia_semana = dia_semana
         self.factor_s = factor_s
-        self.aten_fijo = 10.0 # Minutos de atención
+        self.aten_fijo = 5.0 # Minutos de atención
+        self.d_max_min = d_max_min # Límite de 5 horas máximo (Restricción 14)
         
         # ElementwiseProblem configurado:
         # n_var = permutación de índices de [0... n_clientes-1]
@@ -101,8 +102,18 @@ class TDVRPTWProblem(ElementwiseProblem):
             vol_p = self.vol_dict[cliente_id]
             peso_p = self.peso_dict[cliente_id]
             
-            # SPLIT CONDICIONAL (No penaliza fitness, abre otro camión)
-            if (vol_actual + vol_p > self.cap_vol_cm3) or (peso_actual + peso_p > self.cap_peso_g):
+            # 1. Proyección de la ruta para prever Restricción 14 (Conducción d_max) incluyendo retorno
+            dist_arco_tent = float(self.matriz_dist.loc[nodo_previo, cliente_id])
+            t_viaj_tent = float(tau_ij_vec(np.array([dist_arco_tent]), np.array([t_actual]), self.dia_semana)[0])
+            t_ini_tent = max(t_actual + t_viaj_tent, self.a_dict[cliente_id])
+            t_fin_tent = t_ini_tent + self.aten_fijo
+            
+            dist_retorno_tent = float(self.matriz_dist.loc[cliente_id, self.depot_id])
+            t_viaj_ret_tent = float(tau_ij_vec(np.array([dist_retorno_tent]), np.array([t_fin_tent]), self.dia_semana)[0])
+            tiempo_conduccion_estimado = cam_t_viaje + t_viaj_tent + t_viaj_ret_tent
+            
+            # SPLIT CONDICIONAL (Activa regreso al depósito si se violan capacidades o turno máximo de conducción)
+            if (vol_actual + vol_p > self.cap_vol_cm3) or (peso_actual + peso_p > self.cap_peso_g) or (tiempo_conduccion_estimado > self.d_max_min):
                 # Regreso del camión actual al depósito
                 dist_reg = float(self.matriz_dist.loc[nodo_previo, self.depot_id])
                 d_ret = np.array([dist_reg])

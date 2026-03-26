@@ -115,7 +115,7 @@ def plot_cluster_results(
                 color='black',
                 fill=True,
                 fill_opacity=0.7,
-                tooltip=f"Outlier: {row.get('Número de orden', 'N/A')}"
+                tooltip=f"Outlier | Nodo: {row.get('id_nodo', 'N/A')} | Orden: {row.get('Número de orden', 'N/A')}"
             ).add_to(m)
 
     # Graficar Clusters Válidos
@@ -130,7 +130,7 @@ def plot_cluster_results(
                 folium.Marker(
                     location=[row['latitud'], row['longitud']],
                     icon=folium.Icon(color=color, icon='home', prefix='fa'),
-                    tooltip=f"Depósito (Cluster {c_id})"
+                    tooltip=f"Depósito: {row.get('id_nodo', 'N/A')} (Cluster {c_id})"
                 ).add_to(m)
             else:
                 folium.CircleMarker(
@@ -139,7 +139,7 @@ def plot_cluster_results(
                     color=color,
                     fill=True,
                     fill_opacity=0.9,
-                    tooltip=f"Orden: {row.get('Número de orden', 'N/A')} | Cluster: {c_id}"
+                    tooltip=f"Nodo: {row.get('id_nodo', 'N/A')} | Orden: {row.get('Número de orden', 'N/A')} | Cluster: {c_id}"
                 ).add_to(m)
 
     m.save(filepath)
