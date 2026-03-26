@@ -23,7 +23,7 @@ from pymoo.operators.mutation.inversion import InversionMutation
 from pymoo.operators.sampling.rnd import PermutationRandomSampling
 from pymoo.optimize import minimize
 
-def optimizar_pymoo_ga(cluster_idx, df_cluster, matriz_dist, depot_id):
+def optimizar_pymoo_ga(cluster_idx, df_cluster, matriz_dist, depot_id, dia_semana=0):
     """
     Ejecuta el Algoritmo Genético de PyMoo basado en Permutaciones
     sobre el problema ElementwiseProblem TDVRPTW.
@@ -39,7 +39,8 @@ def optimizar_pymoo_ga(cluster_idx, df_cluster, matriz_dist, depot_id):
         t_inicio=540.0,
         cap_vol_cm3=10_000_000, 
         cap_peso_g=5_000_000,
-        factor_s=1.2
+        factor_s=1.2,
+        dia_semana=dia_semana
     )
 
     if n_clientes == 0:
@@ -99,11 +100,14 @@ def disparar_rutina_ga():
         return
         
     fecha_target = '2026-12-03'
+    # Extraer dinámicamente el día de la semana (0=Lunes, 6=Domingo)
+    dia_semana_target = pd.to_datetime(fecha_target).weekday()
+    
     if 'fecha_entrega' in df.columns:
         df_filtro = df[df['fecha_entrega'] == fecha_target].copy()
     else:
         df_filtro = df.copy()
-    print(f"Pedidos capturados para {fecha_target}: {len(df_filtro)}")
+    print(f"Pedidos capturados para {fecha_target} (Día {dia_semana_target}): {len(df_filtro)}")
     
     if 'id_cliente' in df_filtro.columns and 'id_pedido' in df_filtro.columns:
         df_filtro['rut_clean'] = df_filtro['id_cliente'].apply(clean_rut)
@@ -129,7 +133,7 @@ def disparar_rutina_ga():
     for cluster_id, matriz_dist in matrices_km_o_m.items():
         print(f"\n[PyMoo] Optimizando Cluster {cluster_id} con {len(matriz_dist)-1} clientes...")
         try:
-            dict_out = optimizar_pymoo_ga(cluster_id, df_filtro, matriz_dist, depot_id)
+            dict_out = optimizar_pymoo_ga(cluster_id, df_filtro, matriz_dist, depot_id, dia_semana=dia_semana_target)
             
             f_val       = float(dict_out.get("costo_total", 0.0))
             rutas_asignadas  = dict_out["rutas"]
@@ -191,15 +195,18 @@ def disparar_rutina_ga():
             
             for k_idx, ruta in enumerate(rutas_asignadas):
                 reporte_rutas_md += f"### Camión {k_idx + 1} — Detalle de Paradas\n"
-                reporte_rutas_md += "| # | Nodo | Dist. (km) | T. Viaje | Vel. (h) | Llegada | Ventana | Inic. Serv. | T. Serv | Vol (L) | Peso (kg) | Espera | Viol. | Est |\n"
-                reporte_rutas_md += "| :---: | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |\n"
-                reporte_rutas_md += f"| 0 | {depot_id} | — | — | — | {min_a_hora(t_ini)} | — | {min_a_hora(t_ini)} | — | — | — | — | — | 🏠 |\n"
+                reporte_rutas_md += "| # | Nodo | Dirección | Dist. (km) | T. Viaje | Vel. (h) | Llegada | Ventana | Inic. Serv. | T. Serv | Vol (L) | Peso (kg) | Espera | Viol. | Est |\n"
+                reporte_rutas_md += "| :---: | :--- | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |\n"
+                reporte_rutas_md += f"| 0 | {depot_id} | Base Depósito | — | — | — | {min_a_hora(t_ini)} | — | {min_a_hora(t_ini)} | — | — | — | — | — | 🏠 |\n"
                 
                 for i, nodo in enumerate(ruta):
                     det = detalle_nodos.get(nodo, {})
+                    dir_arr = df_filtro.loc[df_filtro['id_nodo'] == nodo, 'direccion_ruteo'].values
+                    direccion = str(dir_arr[0]).replace('|', ',') if len(dir_arr) > 0 else "N/A"
                     dist_km = float(det.get("dist_arco_m", 0)) / 1000.0
                     t_viaje = float(det.get("t_viaje_min", 0))
                     vel_kmh = (dist_km / (t_viaje / 60.0)) if t_viaje > 0 else 0.0
+                    vel_str = f"{vel_kmh:.1f}" if vel_kmh > 0 else "—"
                     
                     t_real  = float(det.get("t_llegada_real", 0))
                     a_v     = float(det.get("a_ventana", 0))
@@ -217,7 +224,7 @@ def disparar_rutina_ga():
                     viola_str = f"{viola:.0f} m" if viola > 0 else "—"
                     
                     reporte_rutas_md += (
-                        f"| {i+1} | {nodo} | {dist_km:.2f} | {t_viaje:.1f} m | {vel_kmh:.1f} "
+                        f"| {i+1} | {nodo} | {direccion} | {dist_km:.2f} | {t_viaje:.1f} m | {vel_str} "
                         f"| {min_a_hora(t_real)} "
                         f"| [{min_a_hora(a_v)},{min_a_hora(b_v)}] "
                         f"| {min_a_hora(t_serv_ini)} "
@@ -230,9 +237,10 @@ def disparar_rutina_ga():
                 dist_ret_km = float(dc.get("dist_retorno_m", 0)) / 1000.0
                 t_retorno_min = float(dc.get("t_viaje_retorno_min", 0))
                 vel_ret = (dist_ret_km / (t_retorno_min / 60.0)) if t_retorno_min > 0 else 0.0
+                vel_str_ret = f"{vel_ret:.1f}" if vel_ret > 0 else "—"
                 t_llegada_ret = float(dc.get("t_retorno_deposito", t_fin))
                 
-                reporte_rutas_md += f"| {len(ruta)+1} | {depot_id} | {dist_ret_km:.2f} | {t_retorno_min:.1f} m | {vel_ret:.1f} | {min_a_hora(t_llegada_ret)} | — | — | — | — | — | — | — | 🏠 |\n\n"
+                reporte_rutas_md += f"| {len(ruta)+1} | {depot_id} | Base Depósito | {dist_ret_km:.2f} | {t_retorno_min:.1f} m | {vel_str_ret} | {min_a_hora(t_llegada_ret)} | — | — | — | — | — | — | — | 🏠 |\n\n"
                 
             reporte_rutas_md += "\n---\n"
             
