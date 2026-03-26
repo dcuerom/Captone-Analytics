@@ -1,4 +1,4 @@
-id_pedido,id_cliente,Tipo_vivienda,Dirección,Comuna,Latitud,Longitud,fecha_entrega,día,a_ventana,b_ventana,peso_pedido,volumen_pedido
+id_pedido,id_cliente,Tipo_vivienda,Dirección,Comuna,Latitud,Longitud,fecha_entrega,día,a_ventana,b_ventana,peso_pedido_g,volumen_pedido_cm3
 ORD-CL-202612-000001,14512240-4,True,"avenida. matta 5370, Estación Central, Santiago, Chile",Estación Central,-33.4593631,-70.6984636,2026-12-02,2,900,1020,188366,1260186
 ORD-CL-202612-000002,17.313.403-1,False,"avenida. la florida 7678, Macul, Santiago, Chile",Macul,-33.52312259086,-70.578237933496,2026-12-03,3,540,1260,505552,4239399
 ORD-CL-202612-000003,7941056 - 6,True,"avenida. kennedy 5315, Independencia, Santiago, Chile",Independencia,-33.402123811586,-70.580377304719,2026-12-04,4,1020,1140,236554,1898356
