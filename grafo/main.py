@@ -39,7 +39,7 @@ def execute_vrp_pipeline(
     # Homogeneizar RUT y crear ID único previo al clústering
     if 'RUT' in df.columns:
         df['rut_clean'] = df['RUT'].apply(clean_rut)
-        df['id_nodo'] = df['Número de orden'].astype(str).str.strip() + "_" + df['rut_clean']
+        df['id_nodo'] = df['Número de orden'].astype(str).str.strip()
     
     if sample_size and len(df) > sample_size:
         print(f"Tomando una muestra aleatoria de {sample_size} pedidos para la ejecución...")

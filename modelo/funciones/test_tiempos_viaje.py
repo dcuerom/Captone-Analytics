@@ -41,8 +41,8 @@ from modelo.funciones import (
 SAMPLE_SIZE = 60    # Muestra suficiente para que DBSCAN forme al menos un cluster
 DIA_SEMANA  = 0     # Lunes
 
-# Horarios de partida a evaluar (horas desde medianoche)
-HORARIOS_PRUEBA = [9.0, 10.0, 13.0, 17.0, 20.0]
+# Horarios de partida a evaluar (minutos desde medianoche)
+HORARIOS_PRUEBA = [540.0, 600.0, 780.0, 1020.0, 1200.0]
 NOMBRES_HORARIOS = ["09:00", "10:00", "13:00", "17:00", "20:00"]
 
 # ---------------------------------------------------------------------------
@@ -119,8 +119,8 @@ for cid, matriz_km in matrices_km.items():
 
         tiempos_min = []
         for t in HORARIOS_PRUEBA:
-            t_h = float(matrices_tiempo_por_horario[t][cid].loc[origen, destino])
-            tiempos_min.append(round(t_h * 60, 2))  # horas → minutos
+            t_min = float(matrices_tiempo_por_horario[t][cid].loc[origen, destino])
+            tiempos_min.append(round(t_min, 2))  # Ya está en minutos
 
         tiempo_cols = "".join(f"  {v:>8.2f}" for v in tiempos_min)
         print(f"  {etiqueta:<47}  {dist:>8.3f}" + tiempo_cols)
@@ -143,7 +143,7 @@ for cid, matriz_km in matrices_km.items():
         mask = ~np.eye(len(df_t), dtype=bool)
         valores = df_t.values[mask].astype(float)
         finitos = valores[np.isfinite(valores)]
-        promedio_min = np.mean(finitos) * 60 if len(finitos) > 0 else float('nan')
+        promedio_min = np.mean(finitos) if len(finitos) > 0 else float('nan')
         fila += f"  {promedio_min:>8.2f}"
     print(fila)
 
@@ -161,18 +161,18 @@ print(f"{'=' * 70}")
 from modelo.funciones.tiempos_viaje import tau_ij
 
 dist_test = np.array([2.0, 5.0, 10.0, 15.0, 20.0])
-t_test    = np.array([9.0, 10.5, 13.0, 17.3, 20.0])
+t_test    = np.array([540.0, 630.0, 780.0, 1038.0, 1200.0])
 dia_test  = 0  # Lunes
 
 # Vectorizado
-vec_result = tau_ij_vec(dist_test, t_test, dia_test) * 60   # en minutos
+vec_result = tau_ij_vec(dist_test, t_test, dia_test)
 
 # Escalar, uno a uno
 scalar_result = np.array([
-    tau_ij(d, t, dia_test) * 60 for d, t in zip(dist_test, t_test)
+    tau_ij(d, t, dia_test) for d, t in zip(dist_test, t_test)
 ])
 
-print(f"\n  {'dist(km)':<12} {'t (h)':<10} {'escalar(min)':<16} {'vec(min)':<14} {'match?'}")
+print(f"\n  {'dist(km)':<12} {'t(min)':<10} {'escalar(min)':<16} {'vec(min)':<14} {'match?'}")
 print("  " + "-" * 62)
 for d, t, s, v in zip(dist_test, t_test, scalar_result, vec_result):
     match = "✓" if abs(s - v) < 1e-9 else "✗ DIFERENCIA"
