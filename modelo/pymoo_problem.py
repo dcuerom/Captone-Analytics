@@ -69,6 +69,13 @@ class TDVRPTWProblem(ElementwiseProblem):
                          xu=n_clientes - 1, 
                          vtype=int)
 
+        # Plantillas de rotación de turnos (K11, K12, K21, K22)
+        self.plantillas_turnos = [
+            [540.0, 900.0],   # Plantilla K1 (K11, K12): Salida 09:00, 15:00
+            [660.0, 1020.0]   # Plantilla K2 (K21, K22): Salida 11:00, 17:00
+        ]
+        self.costo_fijo_camion = 100_000.0 # Castigo por usar un nuevo camión físico
+        
     def _evaluate(self, x, out, *args, **kwargs):
         """
         x: Cromosoma Permutación de enteros (0..n-1), que mapean a self.clientes_ids.
@@ -83,11 +90,17 @@ class TDVRPTWProblem(ElementwiseProblem):
         
         vol_actual = 0.0
         peso_actual = 0.0
-        t_actual = self.t_inicio
-        nodo_previo = self.depot_id
         rutas_camiones = []
         ruta_act = []
         tiempos_llegada = {}
+        
+        num_camiones_fisicos = 1
+        plantilla_idx = 0
+        turnos_actual = self.plantillas_turnos[plantilla_idx]
+        turno_idx = 0
+        cam_t_salida = turnos_actual[turno_idx]
+        t_actual = cam_t_salida
+        nodo_previo = self.depot_id
         detalle_nodos = {}
         detalle_camiones = []  # Métricas por camión
         
@@ -96,7 +109,6 @@ class TDVRPTWProblem(ElementwiseProblem):
         cam_t_espera = 0.0
         cam_t_servicio = 0.0
         cam_dist = 0.0
-        cam_t_salida = self.t_inicio
         
         for cliente_id in ruta_candidata:
             vol_p = self.vol_dict[cliente_id]
@@ -137,17 +149,30 @@ class TDVRPTWProblem(ElementwiseProblem):
                 
                 rutas_camiones.append(ruta_act)
                 
+                # LÓGICA MULTI-VIAJE (K11->K12 o K21->K22)
+                turno_idx += 1
+                if turno_idx < len(turnos_actual):
+                    # El MISMO camión físico toma el siguiente turno
+                    cam_t_salida = turnos_actual[turno_idx]
+                else:
+                    # El camión actual agotó sus turnos. Contrata un nuevo camión físico alternativo.
+                    num_camiones_fisicos += 1
+                    plantilla_idx = (plantilla_idx + 1) % len(self.plantillas_turnos) # Alterna entre 0 y 1
+                    turnos_actual = self.plantillas_turnos[plantilla_idx]
+                    
+                    turno_idx = 0
+                    cam_t_salida = turnos_actual[turno_idx]
+
                 # Reseteo camión
                 vol_actual = 0.0
                 peso_actual = 0.0
-                t_actual = self.t_inicio
+                t_actual = cam_t_salida
                 nodo_previo = self.depot_id
                 ruta_act = []
                 cam_t_viaje = 0.0
                 cam_t_espera = 0.0
                 cam_t_servicio = 0.0
                 cam_dist = 0.0
-                cam_t_salida = self.t_inicio
         
             # Tránsito hacia cliente
             dist_arco = float(self.matriz_dist.loc[nodo_previo, cliente_id])
@@ -238,7 +263,8 @@ class TDVRPTWProblem(ElementwiseProblem):
         # Solo F y G pueden ir en out — PyMoo apila TODAS las claves del dict
         # en un array numpy para la población completa, y las claves con shapes
         # variables (listas de rutas, dicts) provocan errores de forma inhomogénea.
-        out["F"] = np.array([dist_total_m * self.factor_s])
+        costo_vehiculos = num_camiones_fisicos * self.costo_fijo_camion
+        out["F"] = np.array([(dist_total_m * self.factor_s) + costo_vehiculos])
         out["G"] = np.array([restricciones_fail])
         
         # Datos extra se guardan en instancia para consulta posterior
