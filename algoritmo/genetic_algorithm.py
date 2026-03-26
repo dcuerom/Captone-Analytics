@@ -191,32 +191,48 @@ def disparar_rutina_ga():
             
             for k_idx, ruta in enumerate(rutas_asignadas):
                 reporte_rutas_md += f"### Camión {k_idx + 1} — Detalle de Paradas\n"
-                reporte_rutas_md += "| # | Nodo | Llegada Real | Ventana [a, b] | Inicio Servicio | Espera | Violación | Estado |\n"
-                reporte_rutas_md += "| :---: | :--- | :---: | :---: | :---: | :---: | :---: | :---: |\n"
-                reporte_rutas_md += f"| 0 | {depot_id} | {min_a_hora(t_ini)} | — | {min_a_hora(t_ini)} | — | — | 🏠 |\n"
+                reporte_rutas_md += "| # | Nodo | Dist. (km) | T. Viaje | Vel. (h) | Llegada | Ventana | Inic. Serv. | T. Serv | Vol (L) | Peso (kg) | Espera | Viol. | Est |\n"
+                reporte_rutas_md += "| :---: | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |\n"
+                reporte_rutas_md += f"| 0 | {depot_id} | — | — | — | {min_a_hora(t_ini)} | — | {min_a_hora(t_ini)} | — | — | — | — | — | 🏠 |\n"
                 
                 for i, nodo in enumerate(ruta):
                     det = detalle_nodos.get(nodo, {})
+                    dist_km = float(det.get("dist_arco_m", 0)) / 1000.0
+                    t_viaje = float(det.get("t_viaje_min", 0))
+                    vel_kmh = (dist_km / (t_viaje / 60.0)) if t_viaje > 0 else 0.0
+                    
                     t_real  = float(det.get("t_llegada_real", 0))
                     a_v     = float(det.get("a_ventana", 0))
                     b_v     = float(det.get("b_ventana", 1440))
-                    t_serv  = float(det.get("t_inicio_servicio", 0))
+                    t_serv_ini  = float(det.get("t_inicio_servicio", 0))
+                    t_serv_dur = float(det.get("t_servicio_min", 0))
+                    vol_l      = float(det.get("volumen_cm3", 0)) / 1000.0
+                    peso_kg    = float(det.get("peso_g", 0)) / 1000.0
                     espera  = float(det.get("t_espera_min", 0))
                     viola   = float(det.get("t_violacion_min", 0))
                     ok      = det.get("cumple_ventana", True)
                     
                     estado = "✅" if ok and espera == 0 else ("⏳" if ok else "❌")
-                    espera_str = f"{espera:.0f} min" if espera > 0 else "—"
-                    viola_str = f"{viola:.0f} min" if viola > 0 else "—"
+                    espera_str = f"{espera:.0f} m" if espera > 0 else "—"
+                    viola_str = f"{viola:.0f} m" if viola > 0 else "—"
                     
                     reporte_rutas_md += (
-                        f"| {i+1} | {nodo} | {min_a_hora(t_real)} "
-                        f"| [{min_a_hora(a_v)}, {min_a_hora(b_v)}] "
-                        f"| {min_a_hora(t_serv)} "
+                        f"| {i+1} | {nodo} | {dist_km:.2f} | {t_viaje:.1f} m | {vel_kmh:.1f} "
+                        f"| {min_a_hora(t_real)} "
+                        f"| [{min_a_hora(a_v)},{min_a_hora(b_v)}] "
+                        f"| {min_a_hora(t_serv_ini)} "
+                        f"| {t_serv_dur:.1f} m | {vol_l:.1f} L | {peso_kg:.1f} kg "
                         f"| {espera_str} | {viola_str} | {estado} |\n"
                     )
-                    
-                reporte_rutas_md += f"| {len(ruta)+1} | {depot_id} | {min_a_hora(t_fin)} | — | — | — | — | 🏠 |\n\n"
+                
+                # Fila de retorno al depósito
+                dc = detalle_camiones[k_idx] if k_idx < len(detalle_camiones) else {}
+                dist_ret_km = float(dc.get("dist_retorno_m", 0)) / 1000.0
+                t_retorno_min = float(dc.get("t_viaje_retorno_min", 0))
+                vel_ret = (dist_ret_km / (t_retorno_min / 60.0)) if t_retorno_min > 0 else 0.0
+                t_llegada_ret = float(dc.get("t_retorno_deposito", t_fin))
+                
+                reporte_rutas_md += f"| {len(ruta)+1} | {depot_id} | {dist_ret_km:.2f} | {t_retorno_min:.1f} m | {vel_ret:.1f} | {min_a_hora(t_llegada_ret)} | — | — | — | — | — | — | — | 🏠 |\n\n"
                 
             reporte_rutas_md += "\n---\n"
             

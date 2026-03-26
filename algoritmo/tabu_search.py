@@ -201,62 +201,135 @@ def disparar_rutina_tabu():
         print(f"\nTabú Cluster {cluster_id} con {len(matriz_dist)-1} clientes...")
         mejor_solucion = optimizar_cluster_tabu(cluster_id, df_filtro, matriz_dist, depot_id)
         
-        # Extraer métricas adicionales del out almacenado en el individuo
-        t_ini    = mejor_solucion.tiempos_llegada.get('__t_inicio__', 540.0)
-        t_fin    = mejor_solucion.tiempos_llegada.get('__t_fin__', 0.0)
-        dur_min  = mejor_solucion.tiempos_llegada.get('__duracion__', 0.0)
-        dist_m   = mejor_solucion.f_obj / 1.2  # Revertir factor S para obtener distancia pura
-        
-        # Recuperar directamente desde la reevaluación del mejor cromosoma
+        # Reevaluar el mejor cromosoma para obtener métricas detalladas
         from modelo.pymoo_problem import TDVRPTWProblem
         prob_tmp = TDVRPTWProblem(df_cluster=df_filtro, matriz_dist_m=matriz_dist, depot_id=depot_id, t_inicio=540.0, factor_s=1.2)
-        out_tmp = {}
-        if mejor_solucion.cromosoma:
-            prob_tmp._evaluate(mejor_solucion.cromosoma, out_tmp)
-            t_ini   = out_tmp.get("t_inicio", 540.0)
-            t_fin   = out_tmp.get("t_fin", 0.0)
-            dur_min = out_tmp.get("duracion_min", 0.0)
-            dist_m  = out_tmp.get("dist_total_m", mejor_solucion.f_obj)
+        
+        if mejor_solucion.cromosoma is not None and len(mejor_solucion.cromosoma) > 0:
+            dict_out = prob_tmp.evaluar_completo(mejor_solucion.cromosoma)
+        else:
+            dict_out = {
+                "rutas": [], "tiempos_llegada": {}, "detalle_nodos": {}, "detalle_camiones": [],
+                "dist_total_m": 0.0, "costo_total": 0.0, "t_inicio": 540.0, "t_fin": 540.0,
+                "duracion_min": 0.0, "restricciones_fail": 0.0
+            }
+        
+        rutas_asignadas  = dict_out["rutas"]
+        detalle_nodos    = dict_out.get("detalle_nodos", {})
+        detalle_camiones = dict_out.get("detalle_camiones", [])
+        dist_m      = float(dict_out.get("dist_total_m", 0.0))
+        costo       = float(dict_out.get("costo_total", 0.0))
+        t_ini       = float(dict_out.get("t_inicio", 540.0))
+        t_fin       = float(dict_out.get("t_fin", 0.0))
+        dur_min     = float(dict_out.get("duracion_min", 0.0))
+        g_fail      = float(dict_out.get("restricciones_fail", 0.0))
         
         dur_h = int(dur_min) // 60
         dur_m_rest = int(dur_min) % 60
         
-        print(f" -> Costo F(x): {mejor_solucion.f_obj:.2f} // Multa G(x): {mejor_solucion.g_fail:.2f} // Duración: {dur_h}h {dur_m_rest}min")
+        # Contar cumplimiento de ventanas
+        total_nodos = len(detalle_nodos)
+        nodos_ok = sum(1 for d in detalle_nodos.values() if d["cumple_ventana"])
+        nodos_espera = sum(1 for d in detalle_nodos.values() if d["t_espera_min"] > 0)
+        nodos_violados = total_nodos - nodos_ok
+        espera_total = sum(d["t_espera_min"] for d in detalle_nodos.values())
+        violacion_total = sum(d["t_violacion_min"] for d in detalle_nodos.values())
         
-        reporte_rutas_md += f"## Cluster {cluster_id}\n"
+        print(f" -> F: {costo:.2f} // G: {g_fail:.2f} // Duración: {dur_h}h {dur_m_rest}min // Ventanas OK: {nodos_ok}/{total_nodos}")
+        
+        reporte_rutas_md += f"## Cluster {cluster_id}\n\n"
+        reporte_rutas_md += f"### Resumen Operativo\n"
         reporte_rutas_md += f"| Métrica | Valor |\n| :--- | :--- |\n"
-        reporte_rutas_md += f"| **Distancia Total** | {dist_m:,.1f} m |\n"
-        reporte_rutas_md += f"| **Costo Ruta (× factor S)** | {mejor_solucion.f_obj:,.2f} |\n"
-        reporte_rutas_md += f"| **Penalidad (G)** | {mejor_solucion.g_fail:.2f} |\n"
-        reporte_rutas_md += f"| **Hora Salida Depósito** | {min_a_hora(t_ini)} |\n"
-        reporte_rutas_md += f"| **Hora Retorno Depósito** | {min_a_hora(t_fin)} |\n"
-        reporte_rutas_md += f"| **Duración Total** | {dur_h}h {dur_m_rest}min |\n"
-        reporte_rutas_md += f"| **Vehículos Asignados** | {len(mejor_solucion.rutas)} |\n\n"
+        reporte_rutas_md += f"| Distancia Total | {dist_m:,.1f} m ({dist_m/1000:.2f} km) |\n"
+        reporte_rutas_md += f"| Costo Ruta (F = dist × S) | {costo:,.2f} |\n"
+        reporte_rutas_md += f"| Hora Salida Depósito | {min_a_hora(t_ini)} |\n"
+        reporte_rutas_md += f"| Hora Retorno Depósito | {min_a_hora(t_fin)} |\n"
+        reporte_rutas_md += f"| Duración Total | {dur_h}h {dur_m_rest}min |\n"
+        reporte_rutas_md += f"| Vehículos Asignados | {len(rutas_asignadas)} |\n\n"
         
-        for k_idx, ruta in enumerate(mejor_solucion.rutas):
-            reporte_rutas_md += f"### Camión {k_idx + 1}\n"
-            reporte_rutas_md += "| # | Nodo | Llegada |\n"
-            reporte_rutas_md += "| :--- | :--- | :--- |\n"
-            reporte_rutas_md += f"| 0 | {depot_id} | {min_a_hora(t_ini)} |\n"
+        reporte_rutas_md += f"### Restricción 14: Cumplimiento de Ventanas de Tiempo\n"
+        reporte_rutas_md += f"| Indicador | Valor |\n| :--- | :--- |\n"
+        reporte_rutas_md += f"| Clientes atendidos en ventana | {nodos_ok}/{total_nodos} |\n"
+        reporte_rutas_md += f"| Clientes con espera (llegada anticipada) | {nodos_espera} |\n"
+        reporte_rutas_md += f"| Clientes con violación (llegada tardía) | {nodos_violados} |\n"
+        reporte_rutas_md += f"| Tiempo de espera acumulado | {espera_total:.1f} min |\n"
+        reporte_rutas_md += f"| Violación acumulada (G) | {violacion_total:.1f} min |\n\n"
+        
+        reporte_rutas_md += f"### Desglose de Tiempos por Camión\n"
+        reporte_rutas_md += "| Camión | Salida | Retorno | Viaje Efectivo | Espera | Servicio | Dist. (km) | Clientes |\n"
+        reporte_rutas_md += "| :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |\n"
+        for k_idx, dc in enumerate(detalle_camiones):
+            tv = float(dc.get("t_viaje_efectivo_min", 0))
+            te = float(dc.get("t_espera_total_min", 0))
+            ts = float(dc.get("t_servicio_total_min", 0))
+            dd = float(dc.get("dist_total_m", 0)) / 1000.0
+            sal = float(dc.get("t_salida_deposito", 540))
+            ret = float(dc.get("t_retorno_deposito", 0))
+            nc = dc.get("n_clientes", 0)
+            reporte_rutas_md += (
+                f"| {k_idx+1} | {min_a_hora(sal)} | {min_a_hora(ret)} "
+                f"| {tv:.1f} min | {te:.1f} min | {ts:.1f} min "
+                f"| {dd:.2f} km | {nc} |\n"
+            )
+        reporte_rutas_md += "\n"
+        
+        for k_idx, ruta in enumerate(rutas_asignadas):
+            reporte_rutas_md += f"### Camión {k_idx + 1} — Detalle de Paradas\n"
+            reporte_rutas_md += "| # | Nodo | Dist. (km) | T. Viaje | Vel. (h) | Llegada | Ventana | Inic. Serv. | T. Serv | Vol (L) | Peso (kg) | Espera | Viol. | Est |\n"
+            reporte_rutas_md += "| :---: | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |\n"
+            reporte_rutas_md += f"| 0 | {depot_id} | — | — | — | {min_a_hora(t_ini)} | — | {min_a_hora(t_ini)} | — | — | — | — | — | 🏠 |\n"
             
             for i, nodo in enumerate(ruta):
-                t_arr = mejor_solucion.tiempos_llegada.get(nodo, 0)
-                reporte_rutas_md += f"| {i+1} | {nodo} | {min_a_hora(t_arr)} |\n"
+                det = detalle_nodos.get(nodo, {})
+                dist_km = float(det.get("dist_arco_m", 0)) / 1000.0
+                t_viaje = float(det.get("t_viaje_min", 0))
+                vel_kmh = (dist_km / (t_viaje / 60.0)) if t_viaje > 0 else 0.0
                 
-            reporte_rutas_md += f"| {len(ruta)+1} | {depot_id} | {min_a_hora(t_fin)} |\n\n"
+                t_real  = float(det.get("t_llegada_real", 0))
+                a_v     = float(det.get("a_ventana", 0))
+                b_v     = float(det.get("b_ventana", 1440))
+                t_serv_ini  = float(det.get("t_inicio_servicio", 0))
+                t_serv_dur = float(det.get("t_servicio_min", 0))
+                vol_l      = float(det.get("volumen_cm3", 0)) / 1000.0
+                peso_kg    = float(det.get("peso_g", 0)) / 1000.0
+                espera  = float(det.get("t_espera_min", 0))
+                viola   = float(det.get("t_violacion_min", 0))
+                ok      = det.get("cumple_ventana", True)
                 
+                estado = "✅" if ok and espera == 0 else ("⏳" if ok else "❌")
+                espera_str = f"{espera:.0f} m" if espera > 0 else "—"
+                viola_str = f"{viola:.0f} m" if viola > 0 else "—"
+                
+                reporte_rutas_md += (
+                    f"| {i+1} | {nodo} | {dist_km:.2f} | {t_viaje:.1f} m | {vel_kmh:.1f} "
+                    f"| {min_a_hora(t_real)} "
+                    f"| [{min_a_hora(a_v)},{min_a_hora(b_v)}] "
+                    f"| {min_a_hora(t_serv_ini)} "
+                    f"| {t_serv_dur:.1f} m | {vol_l:.1f} L | {peso_kg:.1f} kg "
+                    f"| {espera_str} | {viola_str} | {estado} |\n"
+                )
+            
+            # Fila de retorno al depósito
+            dc = detalle_camiones[k_idx] if k_idx < len(detalle_camiones) else {}
+            dist_ret_km = float(dc.get("dist_retorno_m", 0)) / 1000.0
+            t_retorno_min = float(dc.get("t_viaje_retorno_min", 0))
+            vel_ret = (dist_ret_km / (t_retorno_min / 60.0)) if t_retorno_min > 0 else 0.0
+            t_llegada_ret = float(dc.get("t_retorno_deposito", t_fin))
+            
+            reporte_rutas_md += f"| {len(ruta)+1} | {depot_id} | {dist_ret_km:.2f} | {t_retorno_min:.1f} m | {vel_ret:.1f} | {min_a_hora(t_llegada_ret)} | — | — | — | — | — | — | — | 🏠 |\n\n"
+            
         reporte_rutas_md += "\n---\n"
         
         # Visualizar en mapa si hay rutas
-        if mejor_solucion.rutas:
+        if rutas_asignadas:
             mapa_cluster_path = os.path.join(mapa_dir, f'rutas_tabu_cluster_{cluster_id}_{fecha_target}.html')
             info_astar = rutas_dict.get(cluster_id, {})
             df_cluster = df_filtro[df_filtro['id_nodo'].isin(
-                [n for ruta in mejor_solucion.rutas for n in ruta]
+                [n for ruta in rutas_asignadas for n in ruta]
             )].copy()
             try:
                 plot_optimized_routes(
-                    rutas_por_camion=mejor_solucion.rutas,
+                    rutas_por_camion=rutas_asignadas,
                     df_cluster=df_cluster,
                     info_rutas_astar=info_astar,
                     depot_id=depot_id,

@@ -112,7 +112,6 @@ class TDVRPTWProblem(ElementwiseProblem):
                 cam_t_viaje += t_viaje_reg
                 cam_dist += dist_reg
                 dist_total_m += dist_reg
-                
                 detalle_camiones.append({
                     "t_viaje_efectivo_min": cam_t_viaje,
                     "t_espera_total_min": cam_t_espera,
@@ -120,7 +119,9 @@ class TDVRPTWProblem(ElementwiseProblem):
                     "dist_total_m": cam_dist,
                     "t_salida_deposito": cam_t_salida,
                     "t_retorno_deposito": t_actual + t_viaje_reg,
-                    "n_clientes": len(ruta_act)
+                    "n_clientes": len(ruta_act),
+                    "dist_retorno_m": dist_reg,
+                    "t_viaje_retorno_min": t_viaje_reg
                 })
                 
                 rutas_camiones.append(ruta_act)
@@ -179,6 +180,9 @@ class TDVRPTWProblem(ElementwiseProblem):
                 "b_ventana": b_p,
                 "t_espera_min": t_espera,
                 "t_inicio_servicio": t_inicio_servicio,
+                "t_servicio_min": self.aten_fijo,
+                "volumen_cm3": vol_p,
+                "peso_g": peso_p,
                 "t_violacion_min": t_violacion,
                 "cumple_ventana": t_violacion == 0.0
             }
@@ -212,7 +216,9 @@ class TDVRPTWProblem(ElementwiseProblem):
                 "dist_total_m": cam_dist,
                 "t_salida_deposito": cam_t_salida,
                 "t_retorno_deposito": t_retorno,
-                "n_clientes": len(ruta_act)
+                "n_clientes": len(ruta_act),
+                "dist_retorno_m": dist_reg_final,
+                "t_viaje_retorno_min": t_viaje_ret
             })
             
             rutas_camiones.append(ruta_act)
