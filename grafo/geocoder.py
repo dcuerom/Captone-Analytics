@@ -25,18 +25,33 @@ def geocode_depot(address: str):
     else:
         raise ValueError(f"No se pudo encontrar la dirección del depósito: {address}")
 
-def geocode_orders(df: pd.DataFrame, address_col: str = 'direccion_ruteo') -> pd.DataFrame:
+def geocode_orders(df: pd.DataFrame, address_col: str = None) -> pd.DataFrame:
     """
     Recibe un DataFrame, y para cada fila obtiene la latitud y longitud 
     usando la API de ArcGIS a través de geopy. Optimizado para direcciones únicas.
+    Detecta automáticamente la columna de dirección entre 'direccion_ruteo', 'Dirección', 'direccion'.
     """
     df_result = df.copy()
+    
+    # Detección automática de la columna de dirección
+    if address_col is None:
+        for candidate in ['direccion_ruteo', 'Dirección', 'Direccion', 'direccion', 'Direc']:
+            if candidate in df_result.columns:
+                address_col = candidate
+                break
+        if address_col is None:
+            raise ValueError(f"No se encontró columna de dirección. Columnas disponibles: {list(df_result.columns)}")
     
     if 'latitud' not in df_result.columns:
         df_result['latitud'] = None
     if 'longitud' not in df_result.columns:
         df_result['longitud'] = None
-        
+
+    # Si ya existen coordenadas para todas las filas, no geocodificar
+    if df_result['latitud'].notna().all() and df_result['longitud'].notna().all():
+        print("Coordenadas ya presentes en el dataset, omitiendo geocodificación.")
+        return df_result
+
     geolocator = ArcGIS(user_agent="capstone_analytics_vrp", adapter_factory=URLLibAdapter)
     geocode = RateLimiter(geolocator.geocode, min_delay_seconds=0.2)
     
@@ -92,7 +107,7 @@ def process_and_save_geocoded_data(input_path: str, output_path: str):
     df_geocoded = geocode_orders(df)
     
     # Imprimir un resumen
-    nulos = df_geocoded['latitud'].isna().sum()
+    nulos = df_geocoded['Latitud'].isna().sum()
     print(f"Geocodificación finalizada. {nulos} direcciones no pudieron ser geocodificadas.")
     
     # Guardar a un nuevo archivo
@@ -101,11 +116,11 @@ def process_and_save_geocoded_data(input_path: str, output_path: str):
     
     return df_geocoded
 
-if __name__ == "__main__":
-    input_file = '../EDA/vrp_orders.xlsx'
-    output_file = '../EDA/vrp_orders_geocoded.xlsx'
-    import os
-    if os.path.exists(input_file):
-        process_and_save_geocoded_data(input_file, output_file)
-    else:
-        print(f"Archivo no encontrado: {input_file}")
+# if __name__ == "__main__":
+#     input_file = '../EDA/vrp_orders.xlsx'
+#     output_file = '../EDA/vrp_orders_geocoded.xlsx'
+#     import os
+#     if os.path.exists(input_file):
+#         process_and_save_geocoded_data(input_file, output_file)
+#     else:
+#         print(f"Archivo no encontrado: {input_file}")

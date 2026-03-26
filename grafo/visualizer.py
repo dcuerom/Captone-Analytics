@@ -147,3 +147,128 @@ def plot_cluster_results(
 
 if __name__ == "__main__":
     print("Módulo 'visualizer' listo. Importa 'plot_network_and_routes' o 'plot_cluster_results'.")
+
+
+def plot_optimized_routes(
+    rutas_por_camion: list,
+    df_cluster: pd.DataFrame,
+    info_rutas_astar: dict,
+    depot_id: str,
+    cluster_id: any,
+    G: nx.MultiDiGraph,
+    filepath: str = "mapa_rutas_optimizadas.html"
+):
+    """
+    Dibuja las rutas optimizadas (GA o Tabu) sobre el grafo de Santiago.
+    
+    Parámetros:
+    - rutas_por_camion: lista de listas con id_nodo de cada camión. Ej: [['n1','n2'], ['n3']]
+    - df_cluster: DataFrame del cluster con columnas latitud, longitud, id_nodo.
+    - info_rutas_astar: dict con claves 'id_origen->id_destino' y valores {'ruta_nodos_osmnx': [...]}
+    - depot_id: identificador del nodo depósito.
+    - cluster_id: ID del cluster para el título del mapa.
+    - G: grafo OSMnx de la red vial.
+    - filepath: ruta donde guardar el HTML.
+    """
+    print(f"Generando mapa de rutas optimizadas para Cluster {cluster_id}...")
+
+    # Construir diccionario rápido de coordenadas por id_nodo
+    coord_dict = {}
+    if not df_cluster.empty and 'id_nodo' in df_cluster.columns:
+        for _, row in df_cluster.iterrows():
+            coord_dict[row['id_nodo']] = (float(row['latitud']), float(row['longitud']))
+
+    # Coordenadas del depósito (fallback al centroide de Santiago)
+    depot_coords = coord_dict.get(depot_id, (-33.4489, -70.6693))
+
+    center_lat = sum(v[0] for v in coord_dict.values()) / max(len(coord_dict), 1)
+    center_lng = sum(v[1] for v in coord_dict.values()) / max(len(coord_dict), 1)
+
+    m = folium.Map(location=[center_lat, center_lng], zoom_start=13, tiles="CartoDB positron")
+
+    colors = ['red', 'blue', 'green', 'purple', 'orange',
+              'darkred', 'cadetblue', 'darkpurple', 'pink', 'black']
+
+    # Marcar el depósito
+    folium.Marker(
+        location=depot_coords,
+        icon=folium.Icon(color='black', icon='home', prefix='fa'),
+        tooltip=f"Depósito ({depot_id})"
+    ).add_to(m)
+
+    for k_idx, ruta in enumerate(rutas_por_camion):
+        color = colors[k_idx % len(colors)]
+        secuencia = [depot_id] + ruta + [depot_id]
+
+        for step, (origen_id, destino_id) in enumerate(zip(secuencia[:-1], secuencia[1:])):
+            clave = f"{origen_id}->{destino_id}"
+            clave_inv = f"{destino_id}->{origen_id}"
+
+            # Intentar trazar la ruta A* real
+            ruta_osmnx = None
+            if clave in info_rutas_astar:
+                ruta_osmnx = info_rutas_astar[clave].get('ruta_nodos_osmnx', [])
+            elif clave_inv in info_rutas_astar:
+                ruta_osmnx = list(reversed(info_rutas_astar[clave_inv].get('ruta_nodos_osmnx', [])))
+
+            if ruta_osmnx and len(ruta_osmnx) > 1:
+                # Trazar usando geometría real de calles
+                route_coords = []
+                for u, v in zip(ruta_osmnx[:-1], ruta_osmnx[1:]):
+                    edge_data = G.get_edge_data(u, v)
+                    if edge_data and 0 in edge_data and 'geometry' in edge_data[0]:
+                        for x, y in edge_data[0]['geometry'].coords:
+                            route_coords.append((y, x))
+                    else:
+                        if not route_coords:
+                            route_coords.append((G.nodes[u]['y'], G.nodes[u]['x']))
+                        route_coords.append((G.nodes[v]['y'], G.nodes[v]['x']))
+
+                if route_coords:
+                    folium.PolyLine(
+                        locations=route_coords,
+                        color=color,
+                        weight=4,
+                        opacity=0.85,
+                        tooltip=f"Camión {k_idx+1} | Tramo {step+1}: {origen_id} → {destino_id}"
+                    ).add_to(m)
+            else:
+                # Fallback: línea recta entre coordenadas
+                c_origen = coord_dict.get(origen_id) or depot_coords
+                c_destino = coord_dict.get(destino_id) or depot_coords
+                folium.PolyLine(
+                    locations=[c_origen, c_destino],
+                    color=color,
+                    weight=3,
+                    opacity=0.6,
+                    dash_array='8',
+                    tooltip=f"Camión {k_idx+1} | Tramo {step+1} (sin ruta OSMnx)"
+                ).add_to(m)
+
+        # Marcar clientes de este camión con numeración
+        for i, nodo_id in enumerate(ruta):
+            coords = coord_dict.get(nodo_id)
+            if coords:
+                folium.CircleMarker(
+                    location=coords,
+                    radius=7,
+                    color=color,
+                    fill=True,
+                    fill_color=color,
+                    fill_opacity=0.9,
+                    tooltip=f"Camión {k_idx+1} | Parada {i+1}: {nodo_id}"
+                ).add_to(m)
+                folium.map.Marker(
+                    location=coords,
+                    icon=folium.DivIcon(
+                        html=f'<div style="font-size:9px;color:white;background:{color};'
+                             f'border-radius:50%;width:18px;height:18px;text-align:center;'
+                             f'line-height:18px;font-weight:bold;">{i+1}</div>',
+                        icon_size=(18, 18),
+                        icon_anchor=(9, 9)
+                    )
+                ).add_to(m)
+
+    m.save(filepath)
+    print(f"Mapa de rutas optimizadas guardado en: {filepath}")
+

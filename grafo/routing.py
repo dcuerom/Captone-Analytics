@@ -12,20 +12,16 @@ def clean_rut(rut: str) -> str:
 def calculate_routing_for_day(df_day: pd.DataFrame, G: nx.MultiDiGraph) -> Tuple[pd.DataFrame, Dict[str, Any]]:
     """
     Calcula la red estricta en función del día, determinando la ruta mínima
-    con A Star (A*) y generando una matriz de distancias en kilómetros.
+    con A Star (A*) y generando una matriz de distancias en metros.
     
     Requisitos del dataframe:
     Debe contener al menos: 'Rut' o 'RUT', 'Número de orden' o 'Número de Orden', 'latitud', 'longitud'
     """
     df = df_day.copy()
     
-    # Manejar posibles diferencias en el nombre de la columna si viene en mayúsculas o minúsculas
-    col_rut = 'Rut' if 'Rut' in df.columns else 'RUT'
-    col_orden = 'Número de orden' if 'Número de orden' in df.columns else 'Número de Orden'
-    
-    # 1. Crear la llave doble (identificador del nodo)
-    df['rut_clean'] = df[col_rut].apply(clean_rut)
-    df['id_nodo'] = df[col_orden].astype(str).str.strip() + "_" + df['rut_clean']
+    # El id_nodo ya viene construido desde la orquestación (main.py o clustering.py)
+    if 'id_nodo' not in df.columns:
+        raise ValueError("El DataFrame debe contener la columna 'id_nodo' pre-calculada.")
     
     df_validos = df.dropna(subset=['latitud', 'longitud']).copy()
     
@@ -43,7 +39,7 @@ def calculate_routing_for_day(df_day: pd.DataFrame, G: nx.MultiDiGraph) -> Tuple
     nearest_nodes_list = ox.distance.nearest_nodes(G, X=xs, Y=ys)
     df_validos['osmnx_node'] = nearest_nodes_list
     
-    # 3. Generar la matriz de distancias cruzada usando A* (en km)
+    # 3. Generar la matriz de distancias cruzada usando A* (en m)
     ids_nodos = df_validos['id_nodo'].tolist()
     osmnx_nodos = df_validos['osmnx_node'].tolist()
     
@@ -76,16 +72,15 @@ def calculate_routing_for_day(df_day: pd.DataFrame, G: nx.MultiDiGraph) -> Tuple
                     
                     # Calcular la distancia sumando el 'length'
                     dist_mts = nx.path_weight(G, ruta, weight='length')
-                    dist_km = dist_mts / 1000.0
                     
                 except nx.NetworkXNoPath:
                     # En caso de que áreas no estén conectadas en la red estricta
-                    dist_km = float('inf')
+                    dist_mts = float('inf')
                     ruta = []
                 
-                matriz.loc[origen_id, destino_id] = round(dist_km, 3)
+                matriz.loc[origen_id, destino_id] = round(dist_mts, 3)
                 info_rutas[f"{origen_id}->{destino_id}"] = {
-                    "distancia_km": round(dist_km, 3),
+                    "distancia_m": round(dist_mts, 3),
                     "ruta_nodos_osmnx": ruta
                 }
                 

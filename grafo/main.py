@@ -1,10 +1,10 @@
 import pandas as pd
 import os
-from geocoder import geocode_orders, geocode_depot
-from network_builder import get_santiago_graph
-from clustering import run_clustering_pipeline
-from routing import calculate_routing_for_day
-from visualizer import plot_cluster_results
+from .geocoder import geocode_orders, geocode_depot
+from .network_builder import get_santiago_graph
+from .clustering import run_clustering_pipeline
+from .routing import calculate_routing_for_day
+from .visualizer import plot_cluster_results
 
 def clean_rut(rut) -> str:
     if pd.isna(rut):
@@ -12,7 +12,7 @@ def clean_rut(rut) -> str:
     return str(rut).replace('.', '').replace('-', '').strip().upper()
 
 def execute_vrp_pipeline(
-    input_file: str = 'EDA/vrp_orders.xlsx', 
+    input_file: str = 'EDA/df_despacho.csv', 
     depot_address: str = "Plaza de Armas, Santiago, Chile",
     sample_size: int = None
 ):
@@ -24,22 +24,26 @@ def execute_vrp_pipeline(
     
     # 1. Carga de datos
     print(f"\n[Paso 1] Cargando datos desde {input_file}...")
-    df = pd.read_excel(input_file)
+    if str(input_file).endswith('.csv'):
+        df = pd.read_csv(input_file)
+    else:
+        df = pd.read_excel(input_file)
     
-    # Normalización básica requerida
-    if 'Número de Orden' in df.columns:
-        df.rename(columns={'Número de Orden': 'Número de orden'}, inplace=True)
-    if 'Fecha de despacho Solicitada' in df.columns:
-        df.rename(columns={'Fecha de despacho Solicitada': 'fecha de despacho'}, inplace=True)
-    if 'volumen_total_m3' in df.columns:
-        df.rename(columns={'volumen_total_m3': 'volumen total_m3'}, inplace=True)
+    # Normalización basada en df_despacho.csv
+    if 'Dirección' in df.columns:
+        df.rename(columns={'Dirección': 'direccion_ruteo'}, inplace=True)
+    if 'Latitud' in df.columns:
+        df.rename(columns={'Latitud': 'latitud'}, inplace=True)
+    if 'Longitud' in df.columns:
+        df.rename(columns={'Longitud': 'longitud'}, inplace=True)
         
-    df.dropna(subset=['direccion_ruteo'], inplace=True)
+    if 'direccion_ruteo' in df.columns:
+        df.dropna(subset=['direccion_ruteo'], inplace=True)
     
-    # Homogeneizar RUT y crear ID único previo al clústering
-    if 'RUT' in df.columns:
-        df['rut_clean'] = df['RUT'].apply(clean_rut)
-        df['id_nodo'] = df['Número de orden'].astype(str).str.strip() + "_" + df['rut_clean']
+    # Crear ID único previo al clústering
+    if 'id_cliente' in df.columns and 'id_pedido' in df.columns:
+        df['rut_clean'] = df['id_cliente'].apply(clean_rut)
+        df['id_nodo'] = df['id_pedido'].astype(str).str.strip() + "_" + df['rut_clean']
     
     if sample_size and len(df) > sample_size:
         print(f"Tomando una muestra aleatoria de {sample_size} pedidos para la ejecución...")
@@ -57,8 +61,8 @@ def execute_vrp_pipeline(
     lat_d, lon_d = geocode_depot(depot_address)
     depot_id = "DEPOT_01_BASE"
     df_depot = pd.DataFrame([{
-        'Número de orden': 'DEPOT_01',
-        'RUT': 'BASE',
+        'id_pedido': 'DEPOT_01',
+        'id_cliente': 'BASE',
         'latitud': lat_d,
         'longitud': lon_d,
         'id_nodo': depot_id,
@@ -69,10 +73,10 @@ def execute_vrp_pipeline(
     print("\n[Paso 4] Agrupando pedidos (DBSCAN Cluster-First)...")
     clusters_dict, outliers, pairs_for_astar = run_clustering_pipeline(df_geo, depot_id=depot_id, id_column='id_nodo', force_outlier_rescue=True)
     
-    # 5. Carga del Grafo de Calles (Reducción de I/O mediante Supabase Storage)
+    # 5. Carga del Grafo de Calles
     print("\n[Paso 5] Cargando Grafo de Red Vial...")
-    base_dir = os.path.dirname(os.path.abspath(__file__))
-    graph_path = os.path.join(base_dir, 'santiago_routing_graph.graphml')
+    graph_base_dir = os.path.dirname(os.path.abspath(__file__))
+    graph_path = os.path.join(graph_base_dir, 'santiago_routing_graph.graphml')
     G = get_santiago_graph(filepath=graph_path)
     
     # 6. Ruteo Exhaustivo por Cluster (Route-Second)
@@ -92,25 +96,26 @@ def execute_vrp_pipeline(
         matrices_por_cluster[c_id] = matriz
         rutas_por_cluster[c_id] = info_rutas
         
-    print("\n=== GENERANDO VISUALIZACIÓN === ")
-    try:
-        # Recuperamos e inyectamos el base_dir
-        out_map_path = os.path.join(base_dir, 'mapa_clusters_santiago.html')
-        # Pasamos a plot_cluster_results el dict modificado o simplemente el base. 
-        # Modificamos clusters_dict para contener la fila del depósito y se vea graficada
-        diccionario_graficar = {}
-        for c_id, df_c in clusters_dict.items():
-            diccionario_graficar[c_id] = pd.concat([df_c, df_depot], ignore_index=True)
+    # print("\n=== GENERANDO VISUALIZACIÓN === ")
+    # try:
+    #     # Recuperamos e inyectamos el base_dir
+    #     out_map_path = os.path.join(base_dir, 'resultados', 'mapa_rutas', 'mapa_clusters_santiago.html')
+    #     os.makedirs(os.path.dirname(out_map_path), exist_ok=True)
+    #     # Pasamos a plot_cluster_results el dict modificado o simplemente el base. 
+    #     # Modificamos clusters_dict para contener la fila del depósito y se vea graficada
+    #     diccionario_graficar = {}
+    #     for c_id, df_c in clusters_dict.items():
+    #         diccionario_graficar[c_id] = pd.concat([df_c, df_depot], ignore_index=True)
             
-        plot_cluster_results(diccionario_graficar, outliers, filepath=out_map_path)
-    except Exception as e:
-        print(f"Advertencia: No se pudo generar la visualización HTML. Error: {e}")
+    #     plot_cluster_results(diccionario_graficar, outliers, filepath=out_map_path)
+    # except Exception as e:
+    #     print(f"Advertencia: No se pudo generar la visualización HTML. Error: {e}")
         
-    print("\n=== PIPELINE FINALIZADO EXITOSAMENTE ===")
-    print(f"Clusters procesados: {len(matrices_por_cluster)}")
-    print(f"Clientes Outliers (ruido geográfico inasignable): {len(outliers)}")
+    # print("\n=== PIPELINE FINALIZADO EXITOSAMENTE ===")
+    # print(f"Clusters procesados: {len(matrices_por_cluster)}")
+    # print(f"Clientes Outliers (ruido geográfico inasignable): {len(outliers)}")
     
-    return matrices_por_cluster, rutas_por_cluster
+    return matrices_por_cluster, rutas_por_cluster, G
 
 if __name__ == "__main__":
     # Test opcional para verificar la integración local
