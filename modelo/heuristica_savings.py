@@ -164,7 +164,8 @@ def _departure_target_by_truck(data) -> Dict[int, float]:
     mapping = {"k11": 540.0, "k12": 900.0, "k21": 660.0, "k22": 1020.0}
     for group_name, value in mapping.items():
         for k in getattr(data, group_name):
-            targets[int(k)] = value
+            k = int(k)
+            targets[k] = min(targets[k], value)
     return targets
 
 
@@ -185,6 +186,7 @@ def _assign_routes_to_trucks(routes: List[List[int]], data) -> Dict[int, List[in
     remaining = set(trucks_sorted)
     for route in routes_sorted:
         picked = None
+        best_score = None
         for k in trucks_sorted:
             if k not in remaining:
                 continue
@@ -197,10 +199,27 @@ def _assign_routes_to_trucks(routes: List[List[int]], data) -> Dict[int, List[in
                 cap_mass_k=data.cap_mass_k,
                 volume_factor=data.volume_factor,
             ):
-                picked = k
-                break
+                score = _route_time_violation_for_truck(
+                    route_customers=route,
+                    truck=k,
+                    data=data,
+                    dep_target=dep_target,
+                )
+                if picked is None or score < best_score:
+                    picked = k
+                    best_score = score
         if picked is None and remaining:
-            picked = next(iter(remaining))
+            # Si no hay factibles por capacidad (poco probable en esta etapa),
+            # igual privilegiamos menor violacion temporal.
+            picked = min(
+                remaining,
+                key=lambda kk: _route_time_violation_for_truck(
+                    route_customers=route,
+                    truck=kk,
+                    data=data,
+                    dep_target=dep_target,
+                ),
+            )
         if picked is not None:
             routes_by_truck[picked] = list(route)
             remaining.remove(picked)
@@ -222,6 +241,91 @@ def _interval_index_from_time(current_min: float, z_t: np.ndarray) -> int:
         return int(np.argmax(mask))
     idx = int(np.searchsorted(starts, current_min, side="right") - 1)
     return int(np.clip(idx, 0, len(z_t) - 1))
+
+
+def _interval_bounds(z_t: np.ndarray, t_idx: int) -> Tuple[float, float]:
+    lower = float(480.0 + 60.0 * z_t[t_idx])
+    upper = float(540.0 + 60.0 * z_t[t_idx])
+    return lower, upper
+
+
+def _build_route_plan_for_truck(
+    route_customers: Sequence[int],
+    truck: int,
+    data,
+    dep_target: Dict[int, float],
+) -> Tuple[List[Tuple[int, int, int]], Dict[int, float], float]:
+    """
+    Retorna:
+    - plan de arcos [(t, i, j), ...]
+    - ts por cliente de la ruta
+    - score de violacion temporal acumulada (0 es mejor)
+    """
+    depot = 0
+    route_nodes = [depot] + list(route_customers) + [depot]
+    current = float(dep_target[truck])
+    plan: List[Tuple[int, int, int]] = []
+    ts_route: Dict[int, float] = {}
+    violation = 0.0
+
+    for i, j in zip(route_nodes[:-1], route_nodes[1:]):
+        if j == depot:
+            t_idx = _interval_index_from_time(current, data.z_t)
+            plan.append((t_idx, i, j))
+            travel = float(data.travel_time_tij[t_idx, i, j])
+            if not np.isfinite(travel):
+                travel = float(data.big_m) / 10.0
+                violation += float(data.big_m) / 10.0
+            current = current + float(data.service_fixed) + travel
+            continue
+
+        best = None
+        for t_idx in range(len(data.z_t)):
+            travel = float(data.travel_time_tij[t_idx, i, j])
+            if not np.isfinite(travel):
+                continue
+            arrival = current + float(data.service_fixed) + travel
+            service_start = max(arrival, float(data.a_i[j]))
+
+            lower_t, upper_t = _interval_bounds(data.z_t, t_idx)
+            v_interval = max(lower_t - service_start, 0.0) + max(service_start - upper_t, 0.0)
+            v_window = max(service_start - float(data.b_i[j]), 0.0)
+            score = v_interval + v_window
+            cand = (score, service_start, t_idx)
+            if best is None or cand < best:
+                best = cand
+
+        if best is None:
+            # Penalizacion fuerte si no hay tiempo de viaje finito.
+            t_idx = _interval_index_from_time(current, data.z_t)
+            plan.append((t_idx, i, j))
+            violation += float(data.big_m) / 10.0
+            current = current + float(data.big_m) / 10.0
+            ts_route[j] = current
+            continue
+
+        score, service_start, t_idx = best
+        plan.append((int(t_idx), i, j))
+        ts_route[j] = float(service_start)
+        current = float(service_start)
+        violation += float(score)
+
+    return plan, ts_route, float(violation)
+
+
+def _route_time_violation_for_truck(
+    route_customers: Sequence[int],
+    truck: int,
+    data,
+    dep_target: Dict[int, float],
+) -> float:
+    _, _, violation = _build_route_plan_for_truck(
+        route_customers=route_customers,
+        truck=truck,
+        data=data,
+        dep_target=dep_target,
+    )
+    return float(violation)
 
 
 def build_savings_seed(problem, seed: int = 42) -> SavingsSeedResult:
@@ -268,31 +372,24 @@ def build_savings_seed(problem, seed: int = 42) -> SavingsSeedResult:
     ts = np.zeros((k_count, n_nodes), dtype=float)
 
     dep_target = _departure_target_by_truck(data)
-    s0 = float(data.service_var_i[depot])
 
     for k in range(k_count):
         route_customers = routes_by_truck.get(k, [])
-        ts[k, depot] = dep_target[k] - s0
+        ts[k, depot] = dep_target[k]
 
         if not route_customers:
             continue
 
-        route_nodes = [depot] + route_customers + [depot]
-        current = ts[k, depot]
-
-        for i, j in zip(route_nodes[:-1], route_nodes[1:]):
-            t_idx = _interval_index_from_time(float(current), data.z_t)
+        plan, ts_route, _ = _build_route_plan_for_truck(
+            route_customers=route_customers,
+            truck=k,
+            data=data,
+            dep_target=dep_target,
+        )
+        for t_idx, i, j in plan:
             x[k, t_idx, i, j] = 1.0
-
-            travel = float(data.travel_time_tij[t_idx, i, j])
-            if not np.isfinite(travel):
-                travel = float(data.big_m) / 10.0
-
-            current = current + float(data.service_var_i[i]) + float(data.service_fixed) + travel
-
-            if j != depot:
-                current = max(current, float(data.a_i[j]))
-                ts[k, j] = current
+        for j, ts_j in ts_route.items():
+            ts[k, j] = float(ts_j)
 
     vec = np.zeros(problem.n_var, dtype=float)
     vec[: problem.n_x] = x.reshape(-1)

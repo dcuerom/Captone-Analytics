@@ -1,148 +1,123 @@
 # Modelo VRPTW en PyMoo
 
-Este README documenta los archivos principales del modelo en `modelo/`:
+Este README documenta los modulos de `modelo/` y se actualiza en cada nueva peticion.
 
-- `modelo_final.py`: formulación TD-VRPTW (con intervalos de tiempo) en PyMoo.
-- `heuristica_savings.py`: construcción de solución inicial con Clarke & Wright (Savings).
-- `prueba.py`: script de prueba para ejecutar una instancia sintética y validar integración.
+## Archivos principales
+
+- `modelo_final.py`: formulacion TD-VRPTW y evaluacion de restricciones en PyMoo.
+- `datos_diarios.py`: construccion de instancia diaria desde `DatosSimulados/df_despacho.csv`.
+- `heuristica_savings.py`: semilla heuristica Clarke & Wright (Savings).
+- `prueba.py`: runner principal para ejecutar pruebas.
 - `pruebas.py`: wrapper de compatibilidad que llama a `prueba.py`.
+- `funciones/`: funciones de tiempo de viaje tipo Fleischmann.
 
-Este documento se irá actualizando en cada nueva petición de desarrollo sobre este módulo.
+## Flujo actual de prueba diaria
 
-## 1) `modelo_final.py`
+1. Se toma un dia especifico de `DatosSimulados/df_despacho.csv` (`--fecha YYYY-MM-DD`).
+2. Se construye matriz de distancias con `grafo/routing.py` si el grafo esta disponible.
+3. Si no se puede usar `grafo` (por ejemplo, falta graphml o dependencias), se usa fallback Haversine para no bloquear pruebas.
+4. Se construye costo con:
+   - `C_ij = Distancia_ij[km] * 130`.
+5. Se crea el problema TD-VRPTW y se corre GA de PyMoo, inyectando semilla Savings (opcional).
+6. Bootstrap defensivo de dependencias:
+   - valida `/.pydeps` antes de usarlo,
+   - si detecta paquetes incompletos (por ejemplo, `numpy._core._multiarray_umath` o `pandas._libs.pandas_parser` faltantes), lo saca de `sys.path` para no romper imports.
+7. Inicializacion y evolucion mejoradas:
+   - multiples semillas Clarke & Wright (`--n-heuristic-seeds`),
+   - operador de reparacion de `ts` y auto-arcos para bajar CV,
+   - mutacion configurable (evita probabilidad demasiado baja en alta dimension).
 
-### Qué contiene
+## Supuestos de esta etapa
 
-- `TDVRPTWData`:
-  - Estructura de datos del problema (costos, capacidades, ventanas, servicio, subsets de camiones, etc.).
-  - Valida dimensiones y consistencia de parámetros.
-  - Permite dos modos para tiempos de viaje:
-    - Entregar `travel_time_tij` directamente.
-    - Entregar `distance_ij` y construir `travel_time_tij` automáticamente usando `modelo/funciones` (Fleischmann).
+- Capacidad de camiones no es limitante aun:
+  - `enforce_capacity=False`.
+- Tiempo de atencion:
+  - `s_i = 0` para todo nodo (se fuerza en validacion).
+  - `aten = 7` minutos (tiempo fijo).
+- Flota para pruebas:
+  - `n_trucks=20`.
+  - `K11 = K12 = {0..9}` (mismos camiones de turno 1).
+  - `K21 = K22 = {10..19}` (mismos camiones de turno 2).
+- El nodo deposito se fuerza como indice 0 del modelo.
 
-- `build_travel_time_tensor_from_distance(...)`:
-  - Usa `tau_ij_vec` de `modelo/funciones/tiempos_viaje.py`.
-  - Convierte matriz de distancias (km) a tensor `T_tij` en minutos para cada intervalo `t`.
+## Ejecucion recomendada
 
-- `TDVRPTWProblem(ElementwiseProblem)`:
-  - Variables:
-    - `x_(i,t,j),k` (codificadas en el cromosoma y umbralizadas a binario con `>=0.5`).
-    - `ts_i,k` (tiempo de servicio/llegada por camión y nodo).
-  - Objetivo:
-    - Minimiza costo total por arcos activos.
-  - Restricciones:
-    - Capacidad volumen y masa.
-    - Conservación de flujo.
-    - Entrada/salida única por cliente.
-    - Coherencia temporal/subtours (Big-M).
-    - Ventanas de tiempo.
-    - Acoplamiento de servicio a intervalo.
-    - Salida/retorno al CD por subconjuntos `K11, K12, K21, K22`.
-    - Duración máxima de ruta.
-
-- `build_toy_tdvrptw_data(...)`:
-  - Crea instancia sintética de prueba.
-  - Construye tiempos usando Fleischmann desde distancias.
-
-### Supuesto de unidades
-
-- El modelo interno trabaja en **minutos** para tiempos.
-- Las funciones de `modelo/funciones` retornan horas, por lo que en la construcción de `T_tij` se convierten a minutos multiplicando por `60`.
-
-## 2) `prueba.py`
-
-### Qué hace
-
-- Construye una instancia sintética con `build_toy_tdvrptw_data`.
-- Instancia `TDVRPTWProblem`.
-- Construye una semilla heurística con Clarke & Wright (Savings) e inyecta esa solución a la población inicial (opcional).
-- Ejecuta GA de PyMoo.
-- Imprime:
-  - Mejor costo.
-  - Violación total de restricciones (CV).
-  - Cantidad de arcos activos.
-  - Rango de tiempos `ts`.
-  - Rutas por camión (texto).
-
-### Ejecución
-
-Desde la raíz del proyecto:
+Desde la raiz del proyecto:
 
 ```powershell
-python modelo/prueba.py
+python modelo/prueba.py --fecha 2026-12-03 --max-orders 40 --n-trucks 20 --cost-per-km 130 --pop-size 60 --n-gen 80
 ```
 
-o como módulo:
+Corrida rapida:
 
 ```powershell
-python -m modelo.prueba
+python modelo/prueba.py --fecha 2026-12-03 --max-orders 8 --n-trucks 20 --cost-per-km 130 --pop-size 20 --n-gen 20 --n-heuristic-seeds 4
 ```
 
-Con parámetros (ejemplo rápido):
+Usar datos toy:
 
 ```powershell
-python modelo/prueba.py --pop-size 20 --n-gen 5 --seed 1
+python modelo/prueba.py --use-toy-data --pop-size 80 --n-gen 120 --n-heuristic-seeds 6 --mutation-prob 0.05
 ```
 
-Sin semilla heurística:
+Nota `toy`:
+
+- ahora usa `n_intervals=13` (09:00-21:00) para ser consistente con turnos de tarde.
+
+Corrida recomendada para mejorar factibilidad (datos reales):
 
 ```powershell
-python modelo/prueba.py --pop-size 20 --n-gen 5 --seed 1 --no-heuristic-seed
+python modelo/prueba.py --fecha 2026-12-03 --max-orders 40 --n-trucks 20 --cost-per-km 130 --pop-size 120 --n-gen 250 --n-heuristic-seeds 8 --mutation-prob 0.05 --mutation-eta 20
 ```
 
-### Flujo recomendado (híbrido)
+## Diagnostico rapido del error de NumPy
 
-- Paso 1: construir solución inicial con Clarke & Wright (rápida y estructurada).
-- Paso 2: usar GA de PyMoo para mejorar esa base (exploración y refinamiento).
-- Ventaja: se reduce el tiempo en poblaciones totalmente inviables y mejora la convergencia inicial.
+Si aparece un error como:
 
-### Interpretación de la tabla de iteraciones (PyMoo)
+- `No module named 'numpy._core._multiarray_umath'`
+- `No module named 'pandas._libs.pandas_parser'`
 
-Durante la ejecución aparece una tabla como:
+la causa tipica es una carpeta `/.pydeps` incompleta que pisa un entorno Python valido.
 
-`n_gen | n_eval | cv_min | cv_avg | f_avg | f_min`
+Desde `2026-03-26`, el modelo evita ese sombreado automaticamente:
 
-Significado:
+- `prueba.py`, `modelo_final.py` y `datos_diarios.py` validan `/.pydeps`;
+- si esta incompleto, no lo usan.
 
-- `n_gen`: generación actual del algoritmo genético.
-- `n_eval`: número acumulado de evaluaciones de la función objetivo/restricciones.
-- `cv_min`: menor violación total de restricciones encontrada en la población de esa generación.
-- `cv_avg`: violación total promedio de restricciones en la población de esa generación.
-- `f_avg`: valor promedio de la función objetivo entre soluciones factibles de esa generación.
-- `f_min`: mejor (mínimo) valor objetivo entre soluciones factibles de esa generación.
+## Salida de consola relevante
 
-Notas útiles:
+- Tabla por generacion:
+  - `n_gen`, `n_eval`, `cv_min`, `cv_avg`, `f_avg`, `f_min`.
+- Resumen final:
+  - mejor objetivo,
+  - CV,
+  - cantidad de arcos activos,
+  - rutas por camion en texto.
 
-- Si no hay factibles en una generación, `f_avg` y `f_min` pueden mostrarse como `-`.
-- En ese caso, la señal de progreso principal es que `cv_min` vaya bajando.
+## Historial de cambios
 
-### ¿Se puede imprimir la ruta de cada camión?
+### 2026-03-26
 
-Sí. Ya está implementado en `prueba.py`.
-
-Qué imprime:
-
-- Camiones usados (solo camiones con al menos un arco activo).
-- Arcos activos por camión, incluyendo intervalo `t`:
-  - Formato: `tX:ORIGEN->DESTINO`.
-- Ruta principal reconstruida en texto desde `DEPOT`.
-- Subrutas residuales (si el individuo tiene estructura no conectada o infeasible).
-
-Nota:
-
-- En corridas cortas o infeasibles, la reconstrucción puede mostrar subrutas residuales; eso ayuda a diagnosticar por qué no se alcanza factibilidad.
-
-## 3) Historial de cambios
+- Se agrego construccion diaria desde `df_despacho.csv` en `datos_diarios.py`.
+- Se dejo configuracion de camiones segun subconjuntos solicitados (20 camiones, 10+10).
+- Se fijo costo como `distancia_km * 130`.
+- Se descarto `s_i` en restriccion temporal (se fija `s_i=0`) y se fijo `aten=7` minutos.
+- Se desactivo capacidad como restriccion activa para esta fase.
+- Se incorporo fallback geodesico (Haversine) cuando `grafo` no esta disponible en runtime.
+- Se forzo deposito como nodo 0 para evitar inconsistencias de rutas.
+- Se agrego bootstrap de dependencias locales (`.pydeps`) para ejecucion de scripts.
+- Se corrigio bootstrap para evitar sombreado por `/.pydeps` incompleto (fix del error `numpy._core._multiarray_umath`).
+- Se amplio el fix para detectar tambien `pandas` incompleto (`pandas._libs.pandas_parser`).
+- Se mejoro el arranque del GA con multiples semillas de ahorro y reparacion de individuos (`ts`/auto-arcos).
+- Se agregaron parametros de exploracion del GA (`mutation_prob`, `mutation_eta`, `crossover_prob`, `crossover_eta`).
+- Se mejoro la asignacion de rutas heuristicas a camiones considerando violacion temporal aproximada.
+- Se ajusto el modo `toy` para usar 13 intervalos y ventanas distribuidas en toda la jornada.
+- Se vectorizo la evaluacion de restricciones en `modelo_final.py` para reducir tiempos de corrida y evitar `KeyboardInterrupt`.
+- Se agrego sanitizacion de `T_tij` (NaN/Inf -> valores finitos) para evitar `CV = inf`.
+- Se reforzo explicitamente que `S_i` se desprecia (solo `service_fixed=7`).
 
 ### 2026-03-25
 
-- Se integró `modelo_final.py` con `modelo/funciones`:
-  - Ahora soporta construir `travel_time_tij` desde `distance_ij` usando `tau_ij_vec`.
-- Se creó `prueba.py` como entrada principal de test.
-- `pruebas.py` quedó como wrapper de compatibilidad.
-- Se añadió este README para mantener documentación viva del módulo.
-- Se mejoró `prueba.py` para reportar también el mejor individuo infeasible cuando no aparece factibilidad en corridas cortas.
-- Se añadieron argumentos CLI en `prueba.py` (`--pop-size`, `--n-gen`, `--seed`).
-- Se documentó la interpretación de columnas de iteración (`n_gen`, `n_eval`, `cv_min`, `cv_avg`, `f_avg`, `f_min`).
-- Se implementó impresión de rutas por camión en `prueba.py` (ruta principal + subrutas residuales).
-- Se implementó inyección de semilla heurística Clarke & Wright antes de correr GA.
+- Integracion inicial de modelo + prueba + heuristica Savings.
+- Impresion de rutas por camion.
+- Documentacion de columnas de iteracion de PyMoo.
