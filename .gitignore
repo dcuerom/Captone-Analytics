@@ -1,7 +1,7 @@
 capstone 
 cache
 .env
-.venv/
+.venv
 .tmp/
 .pydeps/
 grafo/santiago_routing_graph.graphml
