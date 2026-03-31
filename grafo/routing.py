@@ -53,6 +53,37 @@ def calculate_routing_for_day(df_day: pd.DataFrame, G: nx.MultiDiGraph) -> Tuple
         
     info_rutas = {}
     
+    # Pre-filtrar nodos únicos de osmnx para acelerar búsqueda
+    target_nodes = set(osmnx_nodos)
+    
+    # En lugar de N x N A* paths, realizamos 1 expansión radial de Dijkstra por cada Origen ÚNICO
+    # Esto disminuye la carga exponencialmente desde O(N^2) hacia O(N) accesos en árbol.
+    unique_sources = list(set(osmnx_nodos))
+    
+    # Diccionario de caché radial {source_osmnx: (lengths_dict, paths_dict)}
+    dijkstra_radial_cache = {}
+    
+    for origen_gra in unique_sources:
+        try:
+            # Dijkstra evalúa tooodo el subgrafo alcanzable simultáneamente respetando las calles reales
+            lengths, paths = nx.single_source_dijkstra(G, origen_gra, weight='length')
+            
+            # MEMORY FIX (OOM Prevention): 
+            # Interceptar y guardar de la RAM masiva SÓLO las rutas hacia los destinos de nuestro clúster particular.
+            filtered_lengths = {tgt: lengths[tgt] for tgt in target_nodes if tgt in lengths}
+            filtered_paths = {tgt: paths[tgt] for tgt in target_nodes if tgt in paths}
+            
+            dijkstra_radial_cache[origen_gra] = (filtered_lengths, filtered_paths)
+            
+            # Orden de destrucción forzada de diccionarios gigantes (500,000 llaves) a Garbage Collector
+            del lengths
+            del paths
+            
+        except Exception as e:
+            # Si el nodo es completamente inalcanzable (isla de asfalto desconectada)
+            dijkstra_radial_cache[origen_gra] = ({}, {})
+
+    # Ahora simplemente cruzamos el producto cartesiano O(N^2) con diccionarios Hash en O(1) puro
     for i in range(n):
         for j in range(n):
             if i != j:
@@ -62,19 +93,12 @@ def calculate_routing_for_day(df_day: pd.DataFrame, G: nx.MultiDiGraph) -> Tuple
                 origen_id = ids_nodos[i]
                 destino_id = ids_nodos[j]
                 
-                # Para evitar cálculos dobles si el grafo fuese no dirigido
-                # Pero la red vehicular es MultiDiGraph (dirigido, con sentidos de calle),
-                # por lo que matriz[i,j] no necesariamente es igual a matriz[j,i]
+                lengths_dict, paths_dict = dijkstra_radial_cache.get(origen_gra, ({}, {}))
                 
-                try:
-                    # Se usa astar_path con el peso 'length' que osmnx ya calculó en metros
-                    ruta = nx.astar_path(G, origen_gra, destino_gra, weight='length')
-                    
-                    # Calcular la distancia sumando el 'length'
-                    dist_mts = nx.path_weight(G, ruta, weight='length')
-                    
-                except nx.NetworkXNoPath:
-                    # En caso de que áreas no estén conectadas en la red estricta
+                if destino_gra in lengths_dict:
+                    dist_mts = lengths_dict[destino_gra]
+                    ruta = paths_dict[destino_gra]
+                else:
                     dist_mts = float('inf')
                     ruta = []
                 
@@ -84,5 +108,5 @@ def calculate_routing_for_day(df_day: pd.DataFrame, G: nx.MultiDiGraph) -> Tuple
                     "ruta_nodos_osmnx": ruta
                 }
                 
-    print("Matriz y rutas calculadas exitosamente.")
+    print(f"Matriz y rutas calculadas mediante {len(unique_sources)} saltos Dijkstra exitosamente.")
     return matriz, info_rutas

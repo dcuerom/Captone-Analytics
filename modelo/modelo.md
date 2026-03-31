@@ -237,3 +237,16 @@ ts_{i,k} \geq 0 \ ,
 \forall i \in I \cup \{0\} \ , \ 
 \forall k \in K
 $$
+
+## Restricciones Inter-Cluster (Gestor de Flota Global)
+
+Dado que las ecuaciones matemáticas base del sistema VRP se ejecutan particionadas a nivel geográfico por cada subconjunto de nodos (Clúster o $c \in C$), se introduce un modelo de emparejamiento post-optimización que exige que el límite físico de Vehículos Base instalados $N_{total}$ no sea quebrantado en un momento de tiempo simultáneo para el conjunto general.
+
+Llamemos $K_c$ al conjunto de rutas matemáticas construidas y asignadas dentro del clúster $c$. 
+
+$$
+\text{20. Límite de Vehículos Homogéneos Instalados en Transporte Activo:} \\
+\\ \ \\
+
+| \bigcup_{c \in C} \{ \text{Camiones Físicos Activos en el instante } t \} | \le N_{total} \quad \forall t \in \text{Horizonte}
+$$

@@ -272,3 +272,118 @@ def plot_optimized_routes(
     m.save(filepath)
     print(f"Mapa de rutas optimizadas guardado en: {filepath}")
 
+def plot_global_flota_interactive(
+    flota: list,
+    df_global: pd.DataFrame,
+    rutas_dict_global: dict,
+    depot_id: str,
+    G: nx.MultiDiGraph,
+    filepath: str = "mapa_rutas_global.html"
+):
+    """
+    Dibuja TODAS las rutas (turnos y clusters combinados) según la distribución FÍSICA de Camiones.
+    Utiliza multiples FeatureGroups para que cada Camión/Cluster pueda ser activado/desactivado desde el LayerControl.
+    """
+    print(f"Generando Mapa Híbrido Interactivo de Flota Global en {filepath}...")
+    
+    # Coordenadas Globales
+    coord_dict = {}
+    if not df_global.empty:
+        for _, row in df_global.iterrows():
+            coord_dict[row['id_nodo']] = (float(row['latitud']), float(row['longitud']))
+            
+    if not coord_dict:
+        print("Atención: No hay nodos para graficar globalmente.")
+        return
+        
+    depot_coords = coord_dict.get(depot_id, (-33.4489, -70.6693))
+    center_lat = sum(v[0] for v in coord_dict.values()) / max(len(coord_dict), 1)
+    center_lng = sum(v[1] for v in coord_dict.values()) / max(len(coord_dict), 1)
+    
+    m = folium.Map(location=[center_lat, center_lng], zoom_start=12, tiles="CartoDB positron")
+    
+    colors = ['blue', 'green', 'purple', 'orange', 'darkred', 'cadetblue', 'darkblue', 'pink', 'lightgreen', 'black', 'red']
+    
+    folium.Marker(
+        location=depot_coords,
+        icon=folium.Icon(color='black', icon='home', prefix='fa'),
+        tooltip=f"Base Central ({depot_id})"
+    ).add_to(m)
+    
+    # Iteración Transversal por Flota Fija
+    for vehiculo in flota:
+        if not vehiculo.bloques: 
+            continue
+            
+        color = colors[vehiculo.id_vehiculo % len(colors)]
+        
+        # Cada Bloque (turno + cluster) es un FeatureGroup controlable individualmente
+        for b in vehiculo.bloques:
+            fg_name = f"🚚 Vehículo Físico {vehiculo.id_vehiculo} | 🏢 Clúster {b.cluster_id} [{b.turno_op}]"
+            fg = folium.FeatureGroup(name=fg_name, show=True)
+            
+            # Recuperar info A* propia de ese clúster particular
+            info_astar = rutas_dict_global.get(b.cluster_id, {})
+            ruta_pura = b.ruta
+            secuencia = [depot_id] + ruta_pura + [depot_id]
+            
+            for step, (origen_id, destino_id) in enumerate(zip(secuencia[:-1], secuencia[1:])):
+                clave = f"{origen_id}->{destino_id}"
+                clave_inv = f"{destino_id}->{origen_id}"
+                
+                ruta_osmnx = None
+                if clave in info_astar:
+                    ruta_osmnx = info_astar[clave].get('ruta_nodos_osmnx', [])
+                elif clave_inv in info_astar:
+                    ruta_osmnx = list(reversed(info_astar[clave_inv].get('ruta_nodos_osmnx', [])))
+                    
+                if ruta_osmnx and len(ruta_osmnx) > 1:
+                    route_coords = []
+                    for u, v in zip(ruta_osmnx[:-1], ruta_osmnx[1:]):
+                        edge_data = G.get_edge_data(u, v)
+                        if edge_data and 0 in edge_data and 'geometry' in edge_data[0]:
+                            for x, y in edge_data[0]['geometry'].coords:
+                                route_coords.append((y, x))
+                        else:
+                            if not route_coords:
+                                route_coords.append((G.nodes[u]['y'], G.nodes[u]['x']))
+                            route_coords.append((G.nodes[v]['y'], G.nodes[v]['x']))
+                            
+                    if route_coords:
+                        folium.PolyLine(
+                            locations=route_coords,
+                            color=color, weight=5, opacity=0.8,
+                            tooltip=f"Vehículo {vehiculo.id_vehiculo} | Tramo {step+1}"
+                        ).add_to(fg)
+                else:
+                    c_origen = coord_dict.get(origen_id) or depot_coords
+                    c_destino = coord_dict.get(destino_id) or depot_coords
+                    folium.PolyLine(
+                        locations=[c_origen, c_destino],
+                        color=color, weight=4, opacity=0.6, dash_array='10',
+                        tooltip=f"Vehículo {vehiculo.id_vehiculo} | Tramo {step+1} (Recto)"
+                    ).add_to(fg)
+                    
+            for i, nodo_id in enumerate(ruta_pura):
+                coords = coord_dict.get(nodo_id)
+                if coords:
+                    folium.CircleMarker(
+                        location=coords, radius=8, color=color,
+                        fill=True, fill_color=color, fill_opacity=0.9,
+                        tooltip=f"Vehículo {vehiculo.id_vehiculo} ({b.turno_op}) | Stop {i+1}: {nodo_id} | Clúster {b.cluster_id}"
+                    ).add_to(fg)
+                    folium.Marker(
+                        location=coords,
+                        icon=folium.DivIcon(
+                            html=f'<div style="font-size:10px;color:white;background:transparent;'
+                                 f'text-align:center;font-weight:bold;">{i+1}</div>',
+                            icon_size=(20, 20),
+                            icon_anchor=(10, 10)
+                        )
+                    ).add_to(fg)
+            
+            fg.add_to(m)
+            
+    folium.LayerControl(collapsed=False).add_to(m)
+    m.save(filepath)
+    print(f"[Map Viewer] UI Interfaz del mapa consolidado guardada en: {filepath}")

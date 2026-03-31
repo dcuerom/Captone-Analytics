@@ -144,7 +144,10 @@ class TDVRPTWProblem(ElementwiseProblem):
                     "t_retorno_deposito": t_actual + t_viaje_reg,
                     "n_clientes": len(ruta_act),
                     "dist_retorno_m": dist_reg,
-                    "t_viaje_retorno_min": t_viaje_reg
+                    "t_viaje_retorno_min": t_viaje_reg,
+                    "id_camion_fisico": num_camiones_fisicos,
+                    "turno_operacion": "Mañana" if turno_idx == 0 else "Tarde",
+                    "subconjunto_k": f"K{plantilla_idx+1}{turno_idx+1}"
                 })
                 
                 rutas_camiones.append(ruta_act)
@@ -254,7 +257,10 @@ class TDVRPTWProblem(ElementwiseProblem):
                 "t_retorno_deposito": t_retorno,
                 "n_clientes": len(ruta_act),
                 "dist_retorno_m": dist_reg_final,
-                "t_viaje_retorno_min": t_viaje_ret
+                "t_viaje_retorno_min": t_viaje_ret,
+                "id_camion_fisico": num_camiones_fisicos,
+                "turno_operacion": "Mañana" if turno_idx == 0 else "Tarde",
+                "subconjunto_k": f"K{plantilla_idx+1}{turno_idx+1}"
             })
             
             rutas_camiones.append(ruta_act)

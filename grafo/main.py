@@ -13,7 +13,7 @@ def clean_rut(rut) -> str:
 
 def execute_vrp_pipeline(
     input_file: str = 'EDA/df_despacho.csv', 
-    depot_address: str = "Plaza de Armas, Santiago, Chile",
+    depot_address: str = "Santa Elena, Santiago., Bogotá - Sierra Bella, Santiago, RM (Metropolitana)",
     sample_size: int = None
 ):
     """

@@ -7,7 +7,7 @@ Este módulo resuelve el **Vehicle Routing Problem with Time Windows (VRPTW)**: 
 El VRPTW es un problema NP-difícil. La estrategia adoptada para hacerlo computacionalmente tratable es **Cluster-First, Route-Second**:
 
 > 1. **Cluster-First**: Agrupar clientes geográfica y temporalmente (DBSCAN) → reduce el espacio de búsqueda global.
-> 2. **Route-Second**: Optimizar la secuencia de visita dentro de cada grupo con A* sobre un grafo vial real.
+> 2. **Route-Second**: Optimizar la secuencia de visita dentro de cada grupo con árboles radiales (Dijkstra) sobre un grafo vial real.
 
 ---
 
@@ -25,7 +25,7 @@ vrp_orders.xlsx
       │
       ├─► [network_builder.py] Carga grafo vial Santiago (OSMnx / Supabase)
       │
-      ├─► [routing.py]    A* intra-cluster → Matrices NxN de distancia
+      ├─► [routing.py]    Dijkstra Single-Source intra-cluster → Matrices NxN de distancia
       │
       └─► [visualizer.py] Mapa HTML interactivo (Folium)
 ```
@@ -59,7 +59,7 @@ Macro-función que encadena los 6 pasos del sistema:
 | 3 | Geocodificación del depósito (`geocode_depot`) |
 | 4 | Clustering DBSCAN (`run_clustering_pipeline`) |
 | 5 | Carga del grafo vial de Santiago (`get_santiago_graph`) |
-| 6 | Ruteo A* por cluster (`calculate_routing_for_day`) |
+| 6 | Ruteo Dijkstra por cluster (`calculate_routing_for_day`) |
 
 **Parámetros importantes:**
 
@@ -81,7 +81,7 @@ id_nodo = str(Número de orden) + "_" + rut_clean
 
 **Retorna:**
 - `matrices_por_cluster`: `{ cluster_id: DataFrame NxN de distancias km }`
-- `rutas_por_cluster`: `{ cluster_id: dict con info de rutas A* }`
+- `rutas_por_cluster`: `{ cluster_id: dict con info de rutas del grafo Dijkstra }`
 - `outliers`: DataFrame de clientes que no pudieron ser agrupados
 
 ---
@@ -180,7 +180,8 @@ Inyecta el nodo depósito en cada cluster y genera todas las permutaciones dirig
 Cluster 0: [A, B, C, DEPOT] → [(A,B), (A,C), (A,DEPOT), (B,A), (B,C), ...]
 ```
 
-Esto transforma el problema de ruteo global O(N!) en múltiples sub-problemas O(k!) donde `k << N`.
+Esto transforma el problema de ruteo global O(N!) en múltiples sub-problemas O(k!) donde `k << N`. 
+Nota: La generación de las trayectorias de los pares ya no usa A* individual para $k^2$ permutaciones, sino `nx.single_source_dijkstra` para derivar la topología desde cada origen hacia todos sus destinos simultáneamente, acelerando exponencialmente el tiempo de cómputo.
 
 #### `run_clustering_pipeline(df, depot_id, id_column, force_outlier_rescue, time_column) -> (clusters_dict, outliers, pairs_for_astar)`
 
@@ -207,7 +208,7 @@ Visualiza el resultado del clustering DBSCAN:
 
 #### `plot_network_and_routes(G, info_rutas, filepath)`
 
-Renderiza las rutas A* calculadas sobre el grafo vial:
+Renderiza las rutas (vía Dijkstra) calculadas sobre el grafo vial:
 
 - Extrae la **geometría real de las calles** (no líneas rectas) desde los datos de arista del grafo OSMnx.
 - Dibuja `PolyLine` por ruta con colores diferenciados.
@@ -249,7 +250,7 @@ Renderiza las rutas A* calculadas sobre el grafo vial:
 | `scikit-learn` | DBSCAN, StandardScaler |
 | `geopy` | Geocodificación (ArcGIS) |
 | `osmnx` | Descarga y manipulación del grafo vial de Santiago |
-| `networkx` | Representación del grafo dirigido y A* |
+| `networkx` | Representación del grafo dirigido y cálculos Dijkstra |
 | `folium` | Generación de mapas HTML interactivos |
 | `itertools` | Generación de permutaciones para pares A* |
 
@@ -267,7 +268,7 @@ matrices, rutas, outliers = execute_vrp_pipeline(
 )
 
 # matrices: { cluster_id: DataFrame NxN de distancias }
-# rutas:    { cluster_id: { par_nodos: info_ruta_astar } }
+# rutas:    { cluster_id: { par_nodos: info_ruta_osmnx } }
 # outliers: DataFrame con clientes no asignados a ningún cluster
 ```
 
@@ -285,7 +286,7 @@ El archivo `santiago_routing_graph.graphml` se comprime con **GZIP** para eludir
 
 ### Escalabilidad
 
-El parámetro `sample_size` en `execute_vrp_pipeline` permite reducir el conjunto de pedidos para pruebas rápidas. A* sobre grafos viales reales es costoso: para 1000+ clientes sin clustering, el tiempo de cómputo se vuelve inviable. El Cluster-First lo hace lineal en el número de clusters.
+El parámetro `sample_size` en `execute_vrp_pipeline` permite reducir el conjunto de pedidos para pruebas rápidas. El cálculo de caminos sobre grafos viales reales es costoso: para 1000+ clientes sin clustering, el tiempo de cómputo se vuelve inviable. El Cluster-First emparejado con Single-Source Dijkstra lo hace lineal en el número de clústeres originados.
 
 ---
 
