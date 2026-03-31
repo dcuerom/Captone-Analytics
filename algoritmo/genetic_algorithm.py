@@ -1,0 +1,170 @@
+"""
+algoritmo/genetic_algorithm.py
+
+Orquestación del Algoritmo Genético usando PyMoo Oficial (Minimize) y ElementwiseProblem
+para el TDVRPTW.
+"""
+
+import os
+import sys
+import os
+import sys
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from gestion_flota.gestor import asignar_y_reportar
+import pandas as pd
+import numpy as np
+
+base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.append(base_dir)
+
+from grafo.main import execute_vrp_pipeline, clean_rut
+from grafo.visualizer import plot_optimized_routes
+from modelo.pymoo_problem import TDVRPTWProblem
+
+from pymoo.algorithms.soo.nonconvex.ga import GA
+from pymoo.operators.crossover.ox import OrderCrossover
+from pymoo.operators.mutation.inversion import InversionMutation
+from pymoo.operators.sampling.rnd import PermutationRandomSampling
+from pymoo.optimize import minimize
+
+def optimizar_pymoo_ga(cluster_idx, df_cluster, matriz_dist, depot_id, dia_semana=0):
+    """
+    Ejecuta el Algoritmo Genético de PyMoo basado en Permutaciones
+    sobre el problema ElementwiseProblem TDVRPTW.
+    """
+    clientes = [id_n for id_n in matriz_dist.index if id_n != depot_id]
+    n_clientes = len(clientes)
+    
+    # 1. Instanciar Problema Pymoo
+    problem = TDVRPTWProblem(
+        df_cluster=df_cluster, 
+        matriz_dist_m=matriz_dist, 
+        depot_id=depot_id,
+        t_inicio=540.0,
+        cap_vol_cm3=3750000, 
+        cap_peso_g=803333.333333333,
+        factor_s=0.94,
+        dia_semana=dia_semana
+    )
+
+    if n_clientes == 0:
+        return {"F": 0.0, "G": 0.0, "rutas": [], "tiempos_llegada": {},
+                "dist_total_m": 0.0, "costo_total": 0.0, "t_inicio": 540.0, "t_fin": 540.0, "duracion_min": 0.0}
+        
+    if n_clientes == 1:
+        return problem.evaluar_completo([0])
+
+    # 2. Configurar Algoritmo GA de Permutación
+    algorithm = GA(
+        pop_size=50,
+        sampling=PermutationRandomSampling(),
+        crossover=OrderCrossover(),
+        mutation=InversionMutation(),
+        eliminate_duplicates=False  # Desactivado: evita error numpy inhomogeneous con permutaciones
+    )
+    
+    print("      Iniciando Minimize de PyMoo...")
+    # 3. Minimización
+    res = minimize(
+        problem,
+        algorithm,
+        termination=('n_gen', 200),
+        seed=42,
+        verbose=False,
+        save_history=False
+    )
+    
+    if res.X is None:
+        raise ValueError(f"El GA de PyMoo no pudo hallar soluciones factibles para el clúster {cluster_idx}. Las Hard Constraints no se cumplieron.")
+        
+    f_val = float(res.F.flat[0])
+    cv_val = float(res.CV.flat[0]) if res.CV is not None else 0.0
+    print(f"      PyMoo Terminado. Mejor Solución Factible: F = {f_val:.2f} // CV = {cv_val:.2f}")
+    
+    # Re-evaluar el mejor cromosoma para obtener las métricas detalladas
+    return problem.evaluar_completo(res.X)
+
+
+
+def min_a_hora(minutos: float) -> str:
+    """Convierte minutos desde medianoche a formato HH:MM."""
+    h = int(minutos) // 60
+    m = int(minutos) % 60
+    return f"{h:02d}:{m:02d}"
+
+
+def disparar_rutina_ga():
+    print("=== INICIANDO TDVRPTW - GA OFICIAL PYMOO ===")
+    
+    data_path = os.path.join(base_dir, 'DatosSimulados', 'df_despacho.csv')
+    try:
+        df = pd.read_csv(data_path)
+    except Exception:
+        print("CSV de datos no encontrado en DatosSimulados.")
+        return
+        
+    fecha_target = '2026-12-03'
+    # Extraer dinámicamente el día de la semana (0=Lunes, 6=Domingo)
+    dia_semana_target = pd.to_datetime(fecha_target).weekday()
+    
+    if 'fecha_entrega' in df.columns:
+        df_filtro = df[df['fecha_entrega'] == fecha_target].copy()
+    else:
+        df_filtro = df.copy()
+    print(f"Pedidos capturados para {fecha_target} (Día {dia_semana_target}): {len(df_filtro)}")
+    
+    if 'id_cliente' in df_filtro.columns and 'id_pedido' in df_filtro.columns:
+        df_filtro['rut_clean'] = df_filtro['id_cliente'].apply(clean_rut)
+        df_filtro['id_nodo'] = df_filtro['id_pedido'].astype(str).str.strip() + "_" + df_filtro['rut_clean']
+    
+    # Normalizar nombres de columnas geográficas al estándar minuscula del pipeline
+    df_filtro.rename(columns={'Latitud': 'latitud', 'Longitud': 'longitud', 'Dirección': 'direccion_ruteo'}, inplace=True)
+    
+    temp_excel_path = os.path.join(base_dir, 'EDA', 'df_despacho.csv')
+    os.makedirs(os.path.dirname(temp_excel_path), exist_ok=True)
+    df_filtro.to_csv(temp_excel_path, index=False)
+    
+    matrices_km_o_m, rutas_dict, G = execute_vrp_pipeline(input_file=temp_excel_path)
+    
+    out_dir = os.path.join(base_dir, 'resultados', 'rutas')
+    mapa_dir = os.path.join(base_dir, 'resultados', 'mapa_rutas')
+    os.makedirs(out_dir, exist_ok=True)
+    os.makedirs(mapa_dir, exist_ok=True)
+    depot_id = "DEPOT_01_BASE"
+    
+    MAX_CAMIONES_GLOBALES = 20  # <--- Parámetro solicitado para la flota estática total
+    resultados_globales = {}
+    
+    for cluster_id, matriz_dist in matrices_km_o_m.items():
+        print(f"\n[PyMoo] Optimizando Cluster {cluster_id} con {len(matriz_dist)-1} clientes...")
+        try:
+            dict_out = optimizar_pymoo_ga(cluster_id, df_filtro, matriz_dist, depot_id, dia_semana=dia_semana_target)
+            
+            rutas_asignadas  = dict_out["rutas"]
+            resultados_globales[cluster_id] = dict_out
+
+            
+            pass
+            
+        except Exception as e:
+            print(f"Error procesando {cluster_id}: {e}")
+            
+    # LLAMADA AL GESTOR DE FLOTA GLOBAL
+    asignar_y_reportar(
+        resultados_clusters=resultados_globales,
+        max_vehiculos=MAX_CAMIONES_GLOBALES,
+        df_filtro=df_filtro,
+        depot_id=depot_id,
+        fecha_target=fecha_target,
+        tipo_algoritmo="Genético PyMoo",
+        out_dir=out_dir,
+        rutas_dict_global=rutas_dict,
+        G=G,
+        mapa_dir=mapa_dir
+    )
+        
+    print(f"\n[Éxito] Optimización y Asignación de Flota finalizada.")
+
+if __name__ == "__main__":
+    disparar_rutina_ga()
+

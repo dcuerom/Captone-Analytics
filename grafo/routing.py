@@ -12,20 +12,16 @@ def clean_rut(rut: str) -> str:
 def calculate_routing_for_day(df_day: pd.DataFrame, G: nx.MultiDiGraph) -> Tuple[pd.DataFrame, Dict[str, Any]]:
     """
     Calcula la red estricta en función del día, determinando la ruta mínima
-    con A Star (A*) y generando una matriz de distancias en kilómetros.
+    con A Star (A*) y generando una matriz de distancias en metros.
     
     Requisitos del dataframe:
     Debe contener al menos: 'Rut' o 'RUT', 'Número de orden' o 'Número de Orden', 'latitud', 'longitud'
     """
     df = df_day.copy()
     
-    # Manejar posibles diferencias en el nombre de la columna si viene en mayúsculas o minúsculas
-    col_rut = 'Rut' if 'Rut' in df.columns else 'RUT'
-    col_orden = 'Número de orden' if 'Número de orden' in df.columns else 'Número de Orden'
-    
-    # 1. Crear la llave doble (identificador del nodo)
-    df['rut_clean'] = df[col_rut].apply(clean_rut)
-    df['id_nodo'] = df[col_orden].astype(str).str.strip() + "_" + df['rut_clean']
+    # El id_nodo ya viene construido desde la orquestación (main.py o clustering.py)
+    if 'id_nodo' not in df.columns:
+        raise ValueError("El DataFrame debe contener la columna 'id_nodo' pre-calculada.")
     
     df_validos = df.dropna(subset=['latitud', 'longitud']).copy()
     
@@ -43,7 +39,7 @@ def calculate_routing_for_day(df_day: pd.DataFrame, G: nx.MultiDiGraph) -> Tuple
     nearest_nodes_list = ox.distance.nearest_nodes(G, X=xs, Y=ys)
     df_validos['osmnx_node'] = nearest_nodes_list
     
-    # 3. Generar la matriz de distancias cruzada usando A* (en km)
+    # 3. Generar la matriz de distancias cruzada usando A* (en m)
     ids_nodos = df_validos['id_nodo'].tolist()
     osmnx_nodos = df_validos['osmnx_node'].tolist()
     
@@ -57,6 +53,37 @@ def calculate_routing_for_day(df_day: pd.DataFrame, G: nx.MultiDiGraph) -> Tuple
         
     info_rutas = {}
     
+    # Pre-filtrar nodos únicos de osmnx para acelerar búsqueda
+    target_nodes = set(osmnx_nodos)
+    
+    # En lugar de N x N A* paths, realizamos 1 expansión radial de Dijkstra por cada Origen ÚNICO
+    # Esto disminuye la carga exponencialmente desde O(N^2) hacia O(N) accesos en árbol.
+    unique_sources = list(set(osmnx_nodos))
+    
+    # Diccionario de caché radial {source_osmnx: (lengths_dict, paths_dict)}
+    dijkstra_radial_cache = {}
+    
+    for origen_gra in unique_sources:
+        try:
+            # Dijkstra evalúa tooodo el subgrafo alcanzable simultáneamente respetando las calles reales
+            lengths, paths = nx.single_source_dijkstra(G, origen_gra, weight='length')
+            
+            # MEMORY FIX (OOM Prevention): 
+            # Interceptar y guardar de la RAM masiva SÓLO las rutas hacia los destinos de nuestro clúster particular.
+            filtered_lengths = {tgt: lengths[tgt] for tgt in target_nodes if tgt in lengths}
+            filtered_paths = {tgt: paths[tgt] for tgt in target_nodes if tgt in paths}
+            
+            dijkstra_radial_cache[origen_gra] = (filtered_lengths, filtered_paths)
+            
+            # Orden de destrucción forzada de diccionarios gigantes (500,000 llaves) a Garbage Collector
+            del lengths
+            del paths
+            
+        except Exception as e:
+            # Si el nodo es completamente inalcanzable (isla de asfalto desconectada)
+            dijkstra_radial_cache[origen_gra] = ({}, {})
+
+    # Ahora simplemente cruzamos el producto cartesiano O(N^2) con diccionarios Hash en O(1) puro
     for i in range(n):
         for j in range(n):
             if i != j:
@@ -66,28 +93,20 @@ def calculate_routing_for_day(df_day: pd.DataFrame, G: nx.MultiDiGraph) -> Tuple
                 origen_id = ids_nodos[i]
                 destino_id = ids_nodos[j]
                 
-                # Para evitar cálculos dobles si el grafo fuese no dirigido
-                # Pero la red vehicular es MultiDiGraph (dirigido, con sentidos de calle),
-                # por lo que matriz[i,j] no necesariamente es igual a matriz[j,i]
+                lengths_dict, paths_dict = dijkstra_radial_cache.get(origen_gra, ({}, {}))
                 
-                try:
-                    # Se usa astar_path con el peso 'length' que osmnx ya calculó en metros
-                    ruta = nx.astar_path(G, origen_gra, destino_gra, weight='length')
-                    
-                    # Calcular la distancia sumando el 'length'
-                    dist_mts = nx.path_weight(G, ruta, weight='length')
-                    dist_km = dist_mts / 1000.0
-                    
-                except nx.NetworkXNoPath:
-                    # En caso de que áreas no estén conectadas en la red estricta
-                    dist_km = float('inf')
+                if destino_gra in lengths_dict:
+                    dist_mts = lengths_dict[destino_gra]
+                    ruta = paths_dict[destino_gra]
+                else:
+                    dist_mts = float('inf')
                     ruta = []
                 
-                matriz.loc[origen_id, destino_id] = round(dist_km, 3)
+                matriz.loc[origen_id, destino_id] = round(dist_mts, 3)
                 info_rutas[f"{origen_id}->{destino_id}"] = {
-                    "distancia_km": round(dist_km, 3),
+                    "distancia_m": round(dist_mts, 3),
                     "ruta_nodos_osmnx": ruta
                 }
                 
-    print("Matriz y rutas calculadas exitosamente.")
+    print(f"Matriz y rutas calculadas mediante {len(unique_sources)} saltos Dijkstra exitosamente.")
     return matriz, info_rutas

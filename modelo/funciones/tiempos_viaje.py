@@ -112,20 +112,21 @@ def velocidad_para_intervalo(k: int, dia_semana: int) -> float:
     return _SPEED_HORIZON[k - 1, dia_semana]
 
 
-def tau_minimo(distancia_km: float, k: int, dia_semana: int) -> float:
+def tau_minimo(distancia_m: float, k: int, dia_semana: int) -> float:
     """
     Calcula τ_ijk = tiempo mínimo de viaje para una distancia dada en el intervalo k.
     Se asume velocidad constante dentro del intervalo.
 
     τ_ijk = (distancia_ij / velocidad_k) * 60  [minutos]
     """
+    distancia_km = distancia_m / 1000.0
     v = velocidad_para_intervalo(k, dia_semana)
     if v == 0.0:
         return float('inf')
     return (distancia_km / v) * 60.0
 
 
-def tau_ij(distancia_km: float, t: float, dia_semana: int, delta: float = DELTA_DEFAULT) -> float:
+def tau_ij(distancia_m: float, t: float, dia_semana: int, delta: float = DELTA_DEFAULT) -> float:
     """
     Función ESCALAR de tiempo de viaje variable τ_ij(t) según Fleischmann et al. (2004), ec. 2.2.
 
@@ -146,8 +147,8 @@ def tau_ij(distancia_km: float, t: float, dia_semana: int, delta: float = DELTA_
 
     Parámetros
     ----------
-    distancia_km : float
-        Distancia de la ruta i→j en km (salida de `calculate_routing_for_day`).
+    distancia_m : float
+        Distancia de la ruta i→j en metros (salida de `calculate_routing_for_day`).
     t : float
         Hora de partida escalar en minutos desde medianoche. Ej: 570 = 09:30.
     dia_semana : int
@@ -159,8 +160,10 @@ def tau_ij(distancia_km: float, t: float, dia_semana: int, delta: float = DELTA_
     -------
     float : tiempo de viaje estimado en minutos.
     """
-    if distancia_km == 0.0:
+    if distancia_m == 0.0:
         return 0.0
+    
+    distancia_km = distancia_m / 1000.0
 
     t_clamped = float(np.clip(t, Z_0, Z_K))
 
@@ -171,17 +174,18 @@ def tau_ij(distancia_km: float, t: float, dia_semana: int, delta: float = DELTA_
     z_prev = Z_BREAKPOINTS[k_idx]
     z_curr = Z_BREAKPOINTS[k_idx + 1]
 
-    tau_k = tau_minimo(distancia_km, k, dia_semana)
+    # NOTA: tau_minimo ya convierte m→km internamente, así que le pasamos distancia_m
+    tau_k = tau_minimo(distancia_m, k, dia_semana)
 
     delta_right = 0.0 if k == K else delta
     if k < K and t_clamped >= z_curr - delta_right:
-        tau_k1 = tau_minimo(distancia_km, k + 1, dia_semana)
+        tau_k1 = tau_minimo(distancia_m, k + 1, dia_semana)
         s = (tau_k1 - tau_k) / (2.0 * delta_right) if delta_right > 0 else 0.0
         return tau_k + (t_clamped - z_curr + delta_right) * s
 
     delta_left = 0.0 if k == 1 else delta
     if k > 1 and t_clamped <= z_prev + delta_left:
-        tau_k_prev = tau_minimo(distancia_km, k - 1, dia_semana)
+        tau_k_prev = tau_minimo(distancia_m, k - 1, dia_semana)
         s = (tau_k - tau_k_prev) / (2.0 * delta_left) if delta_left > 0 else 0.0
         return tau_k_prev + (t_clamped - z_prev + delta_left) * s
 
@@ -189,7 +193,7 @@ def tau_ij(distancia_km: float, t: float, dia_semana: int, delta: float = DELTA_
 
 
 def tau_ij_vec(
-    distancia_km: np.ndarray,
+    distancia_m: np.ndarray,
     t: np.ndarray,
     dia_semana: int,
     delta: float = DELTA_DEFAULT
@@ -203,19 +207,19 @@ def tau_ij_vec(
 
     Diseño vectorial:
     -----------------
-    Para cada par (distancia_km[i], t[i]), calcula τ_ij usando operaciones matriciales:
+    Para cada par (distancia_m[i], t[i]), calcula τ_ij usando operaciones matriciales:
       1. Identifica el intervalo k activo para cada t[i] con `np.searchsorted` vectorizado.
       2. Construye tensores (N_arcos × K) de τ_ijk y aplica condiciones booleanas.
-      3. El resultado es un array de forma equivalente a distancia_km / t.
+      3. El resultado es un array de forma equivalente a distancia_m / t.
 
     Parámetros
     ----------
-    distancia_km : np.ndarray, shape (N,) o escalar
-        Distancias de cada arco i→j en km.
+    distancia_m : np.ndarray, shape (N,) o escalar
+        Distancias de cada arco i→j en metros.
         Puede ser un escalar, un vector 1-D o un array de cualquier forma.
     t : np.ndarray, shape (N,) o escalar
         Tiempos de partida en horas desde medianoche para cada arco.
-        Debe ser compatible en forma con `distancia_km` (broadcast numpy estándar).
+        Debe ser compatible en forma con `distancia_m` (broadcast numpy estándar).
         En el contexto del modelo VRP, cada t[i] es la hora de salida del nodo i,
         almacenada como variable de decisión continua en el vector `x` de PyMoo.
     dia_semana : int
@@ -241,7 +245,7 @@ def tau_ij_vec(
             tiempos = tau_ij_vec(dist_arco, t_decision, dia_semana=0)
             # tiempos tiene shape (pop_size,) → un tiempo por individuo
     """
-    d = np.asarray(distancia_km, dtype=float)
+    d = np.asarray(distancia_m, dtype=float) / 1000.0
     t_arr = np.asarray(t, dtype=float)
     t_c   = np.clip(t_arr, Z_0, Z_K)
 
@@ -316,24 +320,24 @@ def distancia_a_tiempo_matrix(
     delta: float = DELTA_DEFAULT
 ) -> pd.DataFrame:
     """
-    Convierte una matriz NxN de distancias (km) generada por `routing.py` en una
-    matriz de tiempos de viaje (horas) usando τ_ij(t).
+    Convierte una matriz NxN de distancias (metros) generada por `routing.py` en una
+    matriz de tiempos de viaje (minutos) usando τ_ij(t).
 
     Parámetros
     ----------
     matriz_distancias : pd.DataFrame
-        Matriz NxN con distancias en km. Índice y columnas son `id_nodo`.
+        Matriz NxN con distancias en metros. Índice y columnas son `id_nodo`.
         Corresponde directamente a la salida de `calculate_routing_for_day()`.
     t : float
-        Hora de partida (horas desde medianoche). Ej: 9.5 = 09:30.
+        Hora de partida en minutos desde medianoche. Ej: 570 = 09:30.
     dia_semana : int
         Día de la semana (0=Lunes, …, 6=Domingo).
     delta : float, opcional
-        Parámetro de suavizado δ (default = 0.25 h).
+        Parámetro de suavizado δ en minutos (default = 15.0 min).
 
     Retorna
     -------
-    pd.DataFrame : Matriz NxN de tiempos de viaje en horas, con los mismos
+    pd.DataFrame : Matriz NxN de tiempos de viaje en minutos, con los mismos
                    índices y columnas que `matriz_distancias`.
     """
     ids = list(matriz_distancias.index)
@@ -366,27 +370,18 @@ def matrices_distancia_a_tiempo(
     Parámetros
     ----------
     matrices_por_cluster : dict
-        { cluster_id: DataFrame NxN de distancias en km }
+        { cluster_id: DataFrame NxN de distancias en metros }
         Salida directa de `execute_vrp_pipeline()` en `grafo/main.py`.
     t : float
-        Hora de partida (horas desde medianoche).
+        Hora de partida en minutos desde medianoche.
     dia_semana : int
         Día de la semana (0=Lunes, …, 6=Domingo).
     delta : float, opcional
-        Parámetro de suavizado δ (default = 0.25 h).
+        Parámetro de suavizado δ en minutos (default = 15.0 min).
 
     Retorna
     -------
-    dict : { cluster_id: DataFrame NxN de tiempos de viaje en horas }
-
-    Ejemplo
-    -------
-    >>> from grafo.main import execute_vrp_pipeline
-    >>> from modelo.funciones import matrices_distancia_a_tiempo
-    >>>
-    >>> matrices_km, rutas, _ = execute_vrp_pipeline(sample_size=50)
-    >>> matrices_h = matrices_distancia_a_tiempo(matrices_km, t=9.0, dia_semana=0)
-    >>> print(matrices_h[0])
+    dict : { cluster_id: DataFrame NxN de tiempos de viaje en minutos }
     """
     return {
         cid: distancia_a_tiempo_matrix(df_dist, t, dia_semana, delta)
