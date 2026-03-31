@@ -1,7 +1,7 @@
 capstone 
 cache
 .env
-.venv
+.venv/
 .tmp/
 .pydeps/
 grafo/santiago_routing_graph.graphml
@@ -10,3 +10,4 @@ EDA/Geodatos/
 __pycache__
 *.html
 *.json
+.pydeps_localizacion/ 
