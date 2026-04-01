@@ -1,48 +1,23 @@
-# 🧠 Algoritmos Metaheurísticos
+# 🧠 Módulo `algoritmo/` — Metaheurísticas VRP
 
-Esta carpeta alberga los optimizadores (Algoritmo Genético y Búsqueda Tabú) desarrollados para abordar la complejidad computacional NP-Hard del problema central **TDVRPTW**.
+Esta carpeta conforma la capa superior de orquestación y optimización metaheurística del proyecto. Su rol dentro del pipeline general es servir de "cerebro" para encontrar soluciones casi-óptimas al problema complejo NP-Hard del ruteo de vehículos (VRPTW).
 
-Ambos algoritmos asumen la misma interfaz de datos:
-1. Son inyectados con un espacio de cluster (desde `grafo/main.py`).
-2. Reciben coordenadas y demandas de una muestra del archivo base (`df_despacho.csv`).
-3. Heredan una matriz calculada estrictamente en **metros**.
-4. Cruzan las métricas con el tensor de tiempos `tiempos_viaje.py` definido en el `modelo.py`, utilizando capacidades estandarizadas en **g** y **cm3**.
+## Archivos y su Contribución al Pipeline
 
----
+### `genetic_algorithm.py`
+**Rol:** Es el orquestador principal del proyecto y el punto real de entrada a todo el ecosistema.
+**Contribución en detalle:**
+1. **Punto de Inyección:** Carga los datos base crudos del negocio desde `DatosSimulados/df_despacho.csv`.
+2. **Orquestador Espacial:** Llama internamente a `execute_vrp_pipeline()` del módulo abstracto `grafo/` para transformar las direcciones en coordenadas, agrupar a los clientes (DBSCAN) y obtener una matriz asimétrica calculada sobre las calles de Santiago.
+3. **El Motor Genético:** Instancia y ejecuta un Algoritmo Genético (GA) mediante la librería `pymoo`. Utiliza cromosomas basados en permutación (`PermutationRandomSampling`, `OrderCrossover`) sobre poblaciones de individuos. Castiga penalizaciones fuertemente gracias a las funciones internas definidas en el módulo `modelo/`.
+4. **Despacho Logístico:** Una vez resuelto a nivel de cluster, delega el rompecabezas de turnos al módulo `gestion_flota/` llamando a `asignar_y_reportar()`.
 
-## 🧬 Funcionamiento de `genetic_algorithm.py`
-
-El archivo `genetic_algorithm.py` orquesta la resolución del ruteo utilizando la librería oficial **PyMoo** mediante un Algoritmo Genético (GA) configurado para permutaciones. Su ejecución consta de dos grandes fases:
-
-### 1. Preparación de los Datos y Orquestación (`disparar_rutina_ga`)
-Este es el bloque principal (pipeline) que provee la información al algoritmo de optimización y gestiona las salidas:
-- **Lectura y Filtrado:** Lee el archivo base `df_despacho.csv` desde `/DatosSimulados`, extrayendo los pedidos filtrados para una fecha designada (por ejemplo, `2026-12-03`).
-- **Limpieza y Armado de Nodos:** Genera un ID único (`id_nodo`) por cada cliente consolidando el ID de pedido y el RUT limpio, y normaliza nombres de columnas geográficas.
-- **Extracción Espacial:** Invoca el core geométrico/vial (`execute_vrp_pipeline`) para obtener la matriz de distancias ruteables asimétricas por cada "cluster".
-- **Generación de Entregables:** Al finalizar la optimización iterativa iterando por todos los clústers, genera automáticamente dos resultados clave listos para el negocio:
-  1. Un detallado **Reporte en formato Markdown** (exportado en `resultados/rutas/`) describiendo los KPIs de asignaciones, tiempos de espera, llegadas a destino y violaciones a las ventanas.
-  2. Un **Mapa Interactivo HTML** (exportado en `resultados/mapa_rutas/`) trazando las polilíneas finales apoyando ruteros A* de forma visual.
-
-### 2. Optimización Metaheurística (`optimizar_pymoo_ga`)
-Por cada cluster que reciba el pipeline, la rutina instancia y resuelve la optimización genética:
-- **Modelo Subyacente (`TDVRPTWProblem`):** Inyecta la matriz y los clientes al esquema `ElementwiseProblem` construido con las capacidades y penalizaciones en `modelo/pymoo_problem.py`.
-- **Configuración del Algoritmo Genético (`GA`):**
-  - **Población (`pop_size`):** Base evolutiva de 50 cromosomas/individuos.
-  - **Muestreo Inicial (`PermutationRandomSampling`):** Genera la población aleatoria con secuencias lícitas (permutando clientes en enjambre desde $0 \dots n-1$).
-  - **Crossover (`OrderCrossover`):** Mecanismo de reproducción principal que hereda ordenamientos eficientes sin duplicar y sin perder posiciones contiguas de la ruta.
-  - **Mutación (`InversionMutation`):** Invierte el orden de sub-arreglos de clientes para saltar fuera de los óptimos locales e inyectar diversidad agresiva.
-  - **Evolución (`minimize`):** Funciona a lo largo de 100 iteraciones (`n_gen`) minimizando sistemáticamente la variable "F" (distancia recorrida $\times S$) siempre en favor de los individuos que cumplan el estricto requerimiento de restricción "G" temporal.
+### `ga_vrp.py`
+**Rol:** Esquema prototipo bi-objetivo (NSGA2).
+**Contribución en detalle:**
+Actúa como un artefacto semilla de investigación o Prueba de Concepto (POC) enfocado en optimizaciones multi-objetivo vía NSGA-II. Permite la instanciación de algoritmos genéticos más limpios, sin todo el acoplamiento logístico del archivo principal. Si bien actualmente todo está unificado en `genetic_algorithm.py`, este archivo sirve para experimentación pura con operadores de cruce (SBX) y mutación (PM).
 
 ---
 
-## Ejecutables
-- `genetic_algorithm.py`: Orquesta la optimización genética PyMoo (`GA`) sobre el pipeline de datos espaciales y genera reportes detallados MD / Web.
-- `tabu_search.py`: Implementa Búsqueda Tabú pura bajo una aproximación agresiva local, con lista cíclica basada en swap de nodos.
-
-## Ejecución
-
-Ambos scripts están preparados para invocarse de forma aislada e interactiva desde el nivel superior del proyecto:
-```bash
-python algoritmo/genetic_algorithm.py
-python algoritmo/tabu_search.py
-```
+## Flujo de Trabajo (Resumen)
+El algoritmo contenido acá no calcula el asfalto (eso lo hace `grafo/`) ni impone restricciones matemáticas rígidas en abstracto (eso es trabajo de `modelo/`), simplemente "hace evolucionar" cientos de secuencias de viaje por iteraciones buscando aquella que tenga menores penalizaciones y menor distancia de calle acumulada, despachando su resultado final a la capa de `gestion_flota/`.

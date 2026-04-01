@@ -54,7 +54,7 @@ print("  TEST: Tiempos de Viaje con Variación Temporal (Fleischmann, 2004)")
 print("=" * 70)
 print(f"\n  Muestra: {SAMPLE_SIZE} pedidos | Día: Lunes\n")
 
-matrices_km, rutas_por_cluster = execute_vrp_pipeline(sample_size=SAMPLE_SIZE)
+matrices_km, rutas_por_cluster, *_ = execute_vrp_pipeline(sample_size=SAMPLE_SIZE)
 
 n_clusters = len(matrices_km)
 print(f"\n  ✓ Pipeline finalizado. {n_clusters} cluster(s) generados.\n")

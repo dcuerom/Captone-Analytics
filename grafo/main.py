@@ -111,7 +111,7 @@ def execute_vrp_pipeline(
     # print(f"Clusters procesados: {len(matrices_por_cluster)}")
     # print(f"Clientes Outliers (ruido geográfico inasignable): {len(outliers)}")
     
-    return matrices_por_cluster, rutas_por_cluster, G
+    return matrices_por_cluster, rutas_por_cluster, G, (lat_d, lon_d)
 
 if __name__ == "__main__":
     # Test opcional para verificar la integración local

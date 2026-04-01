@@ -279,7 +279,8 @@ def plot_global_flota_interactive(
     rutas_dict_global: dict,
     depot_id: str,
     G: nx.MultiDiGraph,
-    filepath: str = "mapa_rutas_global.html"
+    filepath: str = "mapa_rutas_global.html",
+    depot_coords: tuple = None
 ):
     """
     Dibuja TODAS las rutas (turnos y clusters combinados) según la distribución FÍSICA de Camiones.
@@ -297,7 +298,8 @@ def plot_global_flota_interactive(
         print("Atención: No hay nodos para graficar globalmente.")
         return
         
-    depot_coords = coord_dict.get(depot_id, (-33.4489, -70.6693))
+    if depot_coords is None:
+        depot_coords = coord_dict.get(depot_id, (-33.4489, -70.6693))
     center_lat = sum(v[0] for v in coord_dict.values()) / max(len(coord_dict), 1)
     center_lng = sum(v[1] for v in coord_dict.values()) / max(len(coord_dict), 1)
     

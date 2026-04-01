@@ -124,7 +124,7 @@ def disparar_rutina_ga():
     os.makedirs(os.path.dirname(temp_excel_path), exist_ok=True)
     df_filtro.to_csv(temp_excel_path, index=False)
     
-    matrices_km_o_m, rutas_dict, G = execute_vrp_pipeline(input_file=temp_excel_path)
+    matrices_km_o_m, rutas_dict, G, depot_coords = execute_vrp_pipeline(input_file=temp_excel_path)
     
     out_dir = os.path.join(base_dir, 'resultados', 'rutas')
     mapa_dir = os.path.join(base_dir, 'resultados', 'mapa_rutas')
@@ -160,7 +160,8 @@ def disparar_rutina_ga():
         out_dir=out_dir,
         rutas_dict_global=rutas_dict,
         G=G,
-        mapa_dir=mapa_dir
+        mapa_dir=mapa_dir,
+        depot_coords=depot_coords
     )
         
     print(f"\n[Éxito] Optimización y Asignación de Flota finalizada.")

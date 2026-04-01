@@ -65,7 +65,8 @@ def asignar_y_reportar(
     out_dir=None,
     rutas_dict_global=None,
     G: Optional[nx.MultiDiGraph] = None,
-    mapa_dir=None
+    mapa_dir=None,
+    depot_coords=None
 ):
     """
     1. Desempaqueta todos los resultados intra-cluster.
@@ -205,7 +206,8 @@ def asignar_y_reportar(
         global_idx = 0
         for b in vehiculo.bloques:
             # 0 de salida del bloque
-            md += f"| {global_idx} | {b.cluster_id} | {b.subc_k} | {depot_id} | Base Depósito | (-33.4489, -70.6693) | 0.00 km | 0.0 m | {min_a_hora(b.t_salida)} | — | {min_a_hora(b.t_salida)} | — | — | — | — | 0.0 | 0.0 | — | 🚗 |\n"
+            d_coords_str = f"({depot_coords[0]:.4f}, {depot_coords[1]:.4f})" if depot_coords else "(-33.4489, -70.6693)"
+            md += f"| {global_idx} | {b.cluster_id} | {b.subc_k} | {depot_id} | Base Depósito | {d_coords_str} | 0.00 km | 0.0 m | {min_a_hora(b.t_salida)} | — | {min_a_hora(b.t_salida)} | — | — | — | — | 0.0 | 0.0 | — | 🚗 |\n"
             global_idx += 1
             
             for nodo in b.ruta:
@@ -249,7 +251,8 @@ def asignar_y_reportar(
             # Fin del bloque (Retorno a la Base)
             dist_ret = float(b.dc.get("dist_retorno_m", 0)) / 1000.0
             t_ret = float(b.dc.get("t_viaje_retorno_min", 0))
-            md += f"| {global_idx} | {b.cluster_id} | {b.subc_k} | {depot_id} | Base Depósito | (-33.4489, -70.6693) | {dist_ret:.2f} km | {t_ret:.1f} m | {min_a_hora(b.t_retorno)} | — | — | — | — | — | — | 0.0 | 0.0 | — | 🏠 |\n"
+            d_coords_str = f"({depot_coords[0]:.4f}, {depot_coords[1]:.4f})" if depot_coords else "(-33.4489, -70.6693)"
+            md += f"| {global_idx} | {b.cluster_id} | {b.subc_k} | {depot_id} | Base Depósito | {d_coords_str} | {dist_ret:.2f} km | {t_ret:.1f} m | {min_a_hora(b.t_retorno)} | — | — | — | — | — | — | 0.0 | 0.0 | — | 🏠 |\n"
             global_idx += 1
             
         md += "\n---\n"
@@ -272,7 +275,8 @@ def asignar_y_reportar(
             rutas_dict_global=rutas_dict_global,
             depot_id=depot_id,
             G=G,
-            filepath=mapa_file
+            filepath=mapa_file,
+            depot_coords=depot_coords
         )
     
     return md
