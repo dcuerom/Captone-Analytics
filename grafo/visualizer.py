@@ -81,11 +81,13 @@ def plot_network_and_routes(
 def plot_cluster_results(
     clusters_dict: dict, 
     outliers: pd.DataFrame, 
-    filepath: str = "mapa_clusters_santiago.html"
+    filepath: str = "mapa_clusters_santiago.html",
+    df_depot: pd.DataFrame = None
 ):
     """
     Genera un mapa HTML con Folium coloreando cada nodo según su clúster de DBSCAN.
     Los outliers se grafican en negro.
+    El depósito se grafica de manera independiente si se proporciona en df_depot.
     """
     print(f"Generando visualización de clusters en {filepath}...")
     
@@ -118,29 +120,28 @@ def plot_cluster_results(
                 tooltip=f"Outlier | Nodo: {row.get('id_nodo', 'N/A')} | Orden: {row.get('Número de orden', 'N/A')}"
             ).add_to(m)
 
+    # Graficar Depósito Independientemente
+    if df_depot is not None and not df_depot.empty:
+        for idx, row in df_depot.iterrows():
+            folium.Marker(
+                location=[row['latitud'], row['longitud']],
+                icon=folium.Icon(color='black', icon='home', prefix='fa'),
+                tooltip=f"Depósito: {row.get('id_nodo', 'N/A')} (Base Central)"
+            ).add_to(m)
+
     # Graficar Clusters Válidos
     for i, (c_id, df_c) in enumerate(clusters_dict.items()):
         color = colors[i % len(colors)]
         
         for idx, row in df_c.iterrows():
-            is_depot = row.get('RUT') == 'BASE'
-            
-            if is_depot:
-                # El depósito se destaca con un marcador especial
-                folium.Marker(
-                    location=[row['latitud'], row['longitud']],
-                    icon=folium.Icon(color=color, icon='home', prefix='fa'),
-                    tooltip=f"Depósito: {row.get('id_nodo', 'N/A')} (Cluster {c_id})"
-                ).add_to(m)
-            else:
-                folium.CircleMarker(
-                    location=[row['latitud'], row['longitud']],
-                    radius=5,
-                    color=color,
-                    fill=True,
-                    fill_opacity=0.9,
-                    tooltip=f"Nodo: {row.get('id_nodo', 'N/A')} | Orden: {row.get('Número de orden', 'N/A')} | Cluster: {c_id}"
-                ).add_to(m)
+            folium.CircleMarker(
+                location=[row['latitud'], row['longitud']],
+                radius=5,
+                color=color,
+                fill=True,
+                fill_opacity=0.9,
+                tooltip=f"Nodo: {row.get('id_nodo', 'N/A')} | Orden: {row.get('Número de orden', 'N/A')} | Cluster: {c_id}"
+            ).add_to(m)
 
     m.save(filepath)
     print(f"Mapa de clusters guardado exitosamente en {filepath}")

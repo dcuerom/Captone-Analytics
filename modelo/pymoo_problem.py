@@ -38,13 +38,22 @@ class TDVRPTWProblem(ElementwiseProblem):
         
         df_idx = self.df_cluster.set_index('id_nodo')
         for cid in self.clientes_ids:
-            try:
-                self.vol_dict[cid] = float(df_idx.loc[cid, 'volumen_pedido_cm3'])
-                self.peso_dict[cid] = float(df_idx.loc[cid, 'peso_pedido_g'])
-                self.a_dict[cid] = float(df_idx.loc[cid, 'a_ventana']) if 'a_ventana' in df_idx.columns else 0.0
-                self.b_dict[cid] = float(df_idx.loc[cid, 'b_ventana']) if 'b_ventana' in df_idx.columns else 1440.0
-            except KeyError:
-                self.vol_dict[cid], self.peso_dict[cid], self.a_dict[cid], self.b_dict[cid] = 0, 0, 0, 1440.0
+            if cid in df_idx.index:
+                # Soporte para ambas convenciones de nombres de columnas
+                vol_col = 'volumen_pedido_cm3' if 'volumen_pedido_cm3' in df_idx.columns else 'volumen_pedido'
+                peso_col = 'peso_pedido_g' if 'peso_pedido_g' in df_idx.columns else 'peso_pedido'
+                
+                # Manejar duplicados silenciosos si existiesen (tomando el primer registro)
+                row = df_idx.loc[cid]
+                if isinstance(row, pd.DataFrame):
+                    row = row.iloc[0]
+                    
+                self.vol_dict[cid] = float(row.get(vol_col, 0.0))
+                self.peso_dict[cid] = float(row.get(peso_col, 0.0))
+                self.a_dict[cid] = float(row.get('a_ventana', 0.0))
+                self.b_dict[cid] = float(row.get('b_ventana', 1440.0))
+            else:
+                self.vol_dict[cid], self.peso_dict[cid], self.a_dict[cid], self.b_dict[cid] = 0.0, 0.0, 0.0, 1440.0
                 
         self.matriz_dist = matriz_dist_m
         self.depot_id = depot_id

@@ -102,13 +102,8 @@ def execute_vrp_pipeline(
         base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         out_map_path = os.path.join(base_dir, 'resultados', 'mapa_rutas', 'mapa_clusters_santiago.html')
         os.makedirs(os.path.dirname(out_map_path), exist_ok=True)
-        # Pasamos a plot_cluster_results el dict modificado o simplemente el base. 
-        # Modificamos clusters_dict para contener la fila del depósito y se vea graficada
-        diccionario_graficar = {}
-        for c_id, df_c in clusters_dict.items():
-            diccionario_graficar[c_id] = pd.concat([df_c, df_depot], ignore_index=True)
-            
-        plot_cluster_results(diccionario_graficar, outliers, filepath=out_map_path)
+        # Pasamos a plot_cluster_results el diccionario base y df_depot de forma separada
+        plot_cluster_results(clusters_dict, outliers, filepath=out_map_path, df_depot=df_depot)
     except Exception as e:
         print(f"Advertencia: No se pudo generar la visualización HTML. Error: {e}")
         
