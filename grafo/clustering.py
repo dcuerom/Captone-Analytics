@@ -32,7 +32,7 @@ def build_feature_matrix(
     if time_column in df_clean.columns:
         # Se forza la conversión numérica (cualquier basura se va a NaN y luego al default)
         df_clean['tiempo_minutos_modelo'] = pd.to_numeric(df_clean[time_column], errors='coerce')
-        df_clean['tiempo_minutos_modelo'].fillna(default_window_start_hour * 60, inplace=True)
+        df_clean['tiempo_minutos_modelo'] = df_clean['tiempo_minutos_modelo'].fillna(default_window_start_hour * 60)
     else:
         df_clean['tiempo_minutos_modelo'] = default_window_start_hour * 60
     
@@ -164,7 +164,9 @@ def run_clustering_pipeline(
     depot_id: str, 
     id_column: str = 'id_nodo', 
     force_outlier_rescue: bool = False,
-    time_column: str = 'ventana_tiempo_minutos'
+    time_column: str = 'ventana_tiempo_minutos',
+    eps: float = 0.3,
+    min_samples: int = 3
 ) -> Tuple[Dict, pd.DataFrame, Dict]:
     """
     Encapsula toda la lógica de clustering (Cluster-First) en un solo pipe.
@@ -179,12 +181,10 @@ def run_clustering_pipeline(
     X, df_clean = build_feature_matrix(df, time_column=time_column, default_window_start_hour=9)
     
     # 2. Normalización (alpha=1.0 por defecto, pero escalable)
-    X_scaled, _ = normalize_and_weight(X, alpha_time=5.0)
+    X_scaled, _ = normalize_and_weight(X, alpha_time=1.0)
     
     # 3. DBSCAN
-    # Nota: Los hiperparámetros eps y min_samples requieren calibración 
-    # según la densidad de la ciudad y el tamaño de la flota.
-    labels = run_dbscan(X_scaled, eps=0.3, min_samples=5)
+    labels = run_dbscan(X_scaled, eps=eps, min_samples=min_samples)
     
     # 4. Gestión
     clusters_dict, outliers = manage_clusters_and_noise(

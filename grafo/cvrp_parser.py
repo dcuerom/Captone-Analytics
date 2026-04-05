@@ -95,6 +95,15 @@ def parse_cvrp_instance(filepath: str):
     df_nodos = pd.DataFrame(data_list)
     depot_id = depots[0] if depots else "1"
     
+    if k_trucks is None:
+        filename = os.path.basename(filepath)
+        match = re.search(r'-k(\d+)', filename, re.IGNORECASE)
+        if match:
+            k_trucks = int(match.group(1))
+            
+    if k_trucks is None:
+        raise ValueError(f"No se pudo encontrar el límite de vehículos (K) en la cabecera ni en el nombre de archivo: {filepath}")
+    
     return {
         "name": name,
         "dimension": dimension,
