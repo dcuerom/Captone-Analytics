@@ -132,61 +132,17 @@ def asignar_y_reportar(
             # Si superamos la capacidad global instalada, registramos como huérfano (necesita camión extra / Tercerizado)
             bloques_huerfanos.append(b)
             
-    # 4. Generación del Reporte Transversal
+    # 4. Construcción de DataFrames para exportación CSV
     def min_a_hora(minutos: float) -> str:
         h = int(minutos) // 60
         m = int(minutos) % 60
         return f"{h:02d}:{m:02d}"
-        
-    md = f"# Reporte Gestión Flota Inter-Cluster - {tipo_algoritmo} - {fecha_target}\n\n"
     
-    # === KPI GLOBALES ===
-    vehiculos_usados = sum(1 for v in flota if v.bloques)
-    tasa_utilizacion = (vehiculos_usados / max_vehiculos) * 100 if max_vehiculos > 0 else 0
-    t_ini_global = 540.0
-    duracion_global_h = int(t_fin_global - t_ini_global) // 60
-    duracion_global_m = int(t_fin_global - t_ini_global) % 60
-    
-    md += f"### KPIs Globales de Utilización\n"
-    md += f"| Métrica | Valor |\n| :--- | :--- |\n"
-    md += f"| Total Clientes Atendidos | {len(detalle_nodos_global)} |\n"
-    md += f"| Total Nodos con Violación (Hard Constr.) | {violaciones_globales} |\n"
-    md += f"| Distancia Global Consolidada | {dist_total_global:,.1f} m ({dist_total_global/1000:.2f} km) |\n"
-    md += f"| Capacidad Flota Fija | {max_vehiculos} Camiones Homogéneos |\n"
-    md += f"| Flota Utilizada | {vehiculos_usados} Camiones ({tasa_utilizacion:.1f}%) |\n"
-    md += f"| Rutas Tercerizadas (Exceso Flota) | {len(bloques_huerfanos)} Subrutas |\n\n"
-    
-    if violaciones_globales > 0:
-        md += f"### ⚠️ Reporte Global de Infactibilidad Estricta\n"
-        md += f"Existen **{violaciones_globales}** nodos que violan su Cierre de Ventana.\n"
-        for nodo_id, d in detalle_nodos_global.items():
-            if not d.get("cumple_ventana", True):
-                v_min = d.get("t_violacion_min", 0)
-                b_v = d.get("b_ventana", 1440)
-                t_serv = d.get("t_inicio_servicio", 0)
-                md += f"- **{nodo_id}**: Visitado {min_a_hora(t_serv)} | Límite legal {min_a_hora(b_v)} | Infracción: **{v_min:.0f} min**.\n"
-        md += "\n"
-        
-    if bloques_huerfanos:
-        md += f"### ❌ Excedente de Flota (Vehículos Tercerizados Necesarios)\n"
-        md += f"El pool global de {max_vehiculos} camiones fue insuficiente por solapamiento horario. Las siguientes rutas no cupieron:\n"
-        for b in bloques_huerfanos:
-            md += f"- Cluster **{b.cluster_id}** | Turno **{b.turno_op}** ({b.subc_k}) | Salida: {min_a_hora(b.t_salida)}\n"
-        md += "\n"
-        
-    md += "---\n\n"
-    
-    # === DESGLOSE AGRUPADO POR VEHÍCULO FÍSICO ===
+    # === DataFrame 1: Resumen de Camiones (Tiempos de Turnos) ===
+    filas_resumen = []
     for vehiculo in flota:
         if not vehiculo.bloques:
             continue
-            
-        md += f"## Vehículo Físico GLOBAL {vehiculo.id_vehiculo}\n\n"
-        
-        # Subtabla del vehículo
-        md += "### Tiempos de Turnos\n"
-        md += "| Cluster | Clase K | Turno | Salida CD | Retorno CD | Viaje Efectivo | Espera | Serv. | Dist. | Clientes |\n"
-        md += "| :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |\n"
         for b in vehiculo.bloques:
             tv = float(b.dc.get("t_viaje_efectivo_min", 0))
             te = float(b.dc.get("t_espera_total_min", 0))
@@ -194,20 +150,55 @@ def asignar_y_reportar(
             dd = float(b.dc.get("dist_total_m", 0)) / 1000.0
             nc = b.dc.get("n_clientes", 0)
             
-            md += (f"| {b.cluster_id} | {b.subc_k} | {b.turno_op} | {min_a_hora(b.t_salida)} | {min_a_hora(b.t_retorno)} "
-                   f"| {tv:.1f} m | {te:.1f} m | {ts:.1f} m | {dd:.1f} km | {nc} |\n")
-        md += "\n"
-        
-        # Tabla gigante iterada por bloques
-        md += f"### Desglose Completo de Paradas\n"
-        md += "| # | Cluster visitado | clase k | Nodo | dirección | coordenadas | Distancia recorrida | Tiempo de viaje | Hora de llegada | Ventana | Inicio de servicio | Tiempo de servicio | vol (L) | peso (kg) | tiempo de espera | violación en vol | violación en peso | violación en ventana | Est |\n"
-        md += "| :---: | :---: | :---: | :--- | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |\n"
+            filas_resumen.append({
+                "Vehiculo_Fisico": vehiculo.id_vehiculo,
+                "Cluster": b.cluster_id,
+                "Clase_K": b.subc_k,
+                "Turno": b.turno_op,
+                "Salida_CD": min_a_hora(b.t_salida),
+                "Retorno_CD": min_a_hora(b.t_retorno),
+                "Viaje_Efectivo_min": round(tv, 1),
+                "Espera_min": round(te, 1),
+                "Servicio_min": round(ts, 1),
+                "Distancia_km": round(dd, 1),
+                "Clientes": nc
+            })
+    
+    df_resumen = pd.DataFrame(filas_resumen)
+    
+    # === DataFrame 2: Detalle Completo de Paradas ===
+    filas_detalle = []
+    for vehiculo in flota:
+        if not vehiculo.bloques:
+            continue
         
         global_idx = 0
         for b in vehiculo.bloques:
-            # 0 de salida del bloque
             d_coords_str = f"({depot_coords[0]:.4f}, {depot_coords[1]:.4f})" if depot_coords else "(-33.4489, -70.6693)"
-            md += f"| {global_idx} | {b.cluster_id} | {b.subc_k} | {depot_id} | Base Depósito | {d_coords_str} | 0.00 km | 0.0 m | {min_a_hora(b.t_salida)} | — | {min_a_hora(b.t_salida)} | — | — | — | — | 0.0 | 0.0 | — | 🚗 |\n"
+            
+            # Fila de salida del depósito
+            filas_detalle.append({
+                "Vehiculo_Fisico": vehiculo.id_vehiculo,
+                "Secuencia": global_idx,
+                "Cluster_Visitado": b.cluster_id,
+                "Clase_K": b.subc_k,
+                "Nodo": depot_id,
+                "Direccion": "Base Depósito",
+                "Coordenadas": d_coords_str,
+                "Distancia_Recorrida_km": 0.0,
+                "Tiempo_Viaje_min": 0.0,
+                "Hora_Llegada": min_a_hora(b.t_salida),
+                "Ventana": "—",
+                "Inicio_Servicio": min_a_hora(b.t_salida),
+                "Tiempo_Servicio_min": "—",
+                "Vol_L": "—",
+                "Peso_kg": "—",
+                "Tiempo_Espera_min": "—",
+                "Violacion_Vol": 0.0,
+                "Violacion_Peso": 0.0,
+                "Violacion_Ventana_min": "—",
+                "Estado": "🚗"
+            })
             global_idx += 1
             
             for nodo in b.ruta:
@@ -231,37 +222,245 @@ def asignar_y_reportar(
                 peso_kg = float(det.get("peso_g", 0)) / 1000.0
                 
                 espera = float(det.get("t_espera_min", 0))
-                str_espera = f"{espera:.0f} m" if espera > 0 else "0 m"
-                
                 viola_v = float(det.get("t_violacion_min", 0))
-                str_viola = f"{viola_v:.0f} m" if viola_v > 0 else "0 m"
-                
-                # Las variables de vol y peso como son hard-constraints serán 0 siempre por definición
-                viol_vol_str = "0.0"
-                viol_peso_str = "0.0"
                 
                 ok = det.get("cumple_ventana", True)
                 estado = "✅" if ok and espera == 0 else ("⏳" if ok else "❌")
                 
-                md += (f"| {global_idx} | {b.cluster_id} | {b.subc_k} | {nodo} | {dir_real} | {coordenadas_str} | {dist_km:.2f} km | {t_viaje:.1f} m "
-                       f"| {min_a_hora(t_real)} | [{min_a_hora(a_v)}, {min_a_hora(b_v)}] | {min_a_hora(t_serv_ini)} "
-                       f"| {t_serv_dur:.1f} m | {vol_l:.1f} | {peso_kg:.1f} | {str_espera} | {viol_vol_str} | {viol_peso_str} | {str_viola} | {estado} |\n")
+                filas_detalle.append({
+                    "Vehiculo_Fisico": vehiculo.id_vehiculo,
+                    "Secuencia": global_idx,
+                    "Cluster_Visitado": b.cluster_id,
+                    "Clase_K": b.subc_k,
+                    "Nodo": nodo,
+                    "Direccion": dir_real,
+                    "Coordenadas": coordenadas_str,
+                    "Distancia_Recorrida_km": round(dist_km, 2),
+                    "Tiempo_Viaje_min": round(t_viaje, 1),
+                    "Hora_Llegada": min_a_hora(t_real),
+                    "Ventana": f"[{min_a_hora(a_v)}, {min_a_hora(b_v)}]",
+                    "Inicio_Servicio": min_a_hora(t_serv_ini),
+                    "Tiempo_Servicio_min": round(t_serv_dur, 1),
+                    "Vol_L": round(vol_l, 1),
+                    "Peso_kg": round(peso_kg, 1),
+                    "Tiempo_Espera_min": round(espera, 1),
+                    "Violacion_Vol": 0.0,
+                    "Violacion_Peso": 0.0,
+                    "Violacion_Ventana_min": round(viola_v, 1),
+                    "Estado": estado
+                })
                 global_idx += 1
-                
-            # Fin del bloque (Retorno a la Base)
+            
+            # Fila de retorno al depósito
             dist_ret = float(b.dc.get("dist_retorno_m", 0)) / 1000.0
             t_ret = float(b.dc.get("t_viaje_retorno_min", 0))
             d_coords_str = f"({depot_coords[0]:.4f}, {depot_coords[1]:.4f})" if depot_coords else "(-33.4489, -70.6693)"
-            md += f"| {global_idx} | {b.cluster_id} | {b.subc_k} | {depot_id} | Base Depósito | {d_coords_str} | {dist_ret:.2f} km | {t_ret:.1f} m | {min_a_hora(b.t_retorno)} | — | — | — | — | — | — | 0.0 | 0.0 | — | 🏠 |\n"
-            global_idx += 1
             
-        md += "\n---\n"
+            filas_detalle.append({
+                "Vehiculo_Fisico": vehiculo.id_vehiculo,
+                "Secuencia": global_idx,
+                "Cluster_Visitado": b.cluster_id,
+                "Clase_K": b.subc_k,
+                "Nodo": depot_id,
+                "Direccion": "Base Depósito",
+                "Coordenadas": d_coords_str,
+                "Distancia_Recorrida_km": round(dist_ret, 2),
+                "Tiempo_Viaje_min": round(t_ret, 1),
+                "Hora_Llegada": min_a_hora(b.t_retorno),
+                "Ventana": "—",
+                "Inicio_Servicio": "—",
+                "Tiempo_Servicio_min": "—",
+                "Vol_L": "—",
+                "Peso_kg": "—",
+                "Tiempo_Espera_min": "—",
+                "Violacion_Vol": 0.0,
+                "Violacion_Peso": 0.0,
+                "Violacion_Ventana_min": "—",
+                "Estado": "🏠"
+            })
+            global_idx += 1
+    
+    df_detalle = pd.DataFrame(filas_detalle)
+    
+    # === Exportación a 2 CSVs ===
+    csv_resumen = os.path.join(out_dir, f'resumen_camiones_{tipo_algoritmo.lower().replace(" ", "")}_{fecha_target}.csv')
+    csv_detalle = os.path.join(out_dir, f'detalle_paradas_{tipo_algoritmo.lower().replace(" ", "")}_{fecha_target}.csv')
+    
+    df_resumen.to_csv(csv_resumen, index=False, encoding='utf-8-sig')
+    df_detalle.to_csv(csv_detalle, index=False, encoding='utf-8-sig')
+    
+    print(f"\n[Gestor Flota] Resumen de camiones guardado en: {csv_resumen}")
+    print(f"[Gestor Flota] Detalle de paradas guardado en: {csv_detalle}")
+    
+    # === CSV 3: KPIs Globales ===
+    vehiculos_usados = sum(1 for v in flota if v.bloques)
+    tasa_utilizacion_flota = (vehiculos_usados / max_vehiculos) * 100 if max_vehiculos > 0 else 0
+    total_clientes = len(detalle_nodos_global)
+    
+    # Entregas a tiempo (cumple ventana)
+    entregas_a_tiempo = sum(1 for d in detalle_nodos_global.values() if d.get("cumple_ventana", True))
+    pct_entregas_a_tiempo = (entregas_a_tiempo / total_clientes * 100) if total_clientes > 0 else 0
+    
+    # Tardanza promedio (solo nodos con violación)
+    tardanzas = [d.get("t_violacion_min", 0) for d in detalle_nodos_global.values() if d.get("t_violacion_min", 0) > 0]
+    tardanza_promedio = sum(tardanzas) / len(tardanzas) if tardanzas else 0.0
+    
+    # Tiempo total en ruta (horas) — suma de tiempos efectivos de todos los bloques
+    tiempo_total_ruta_min = 0.0
+    viaje_efectivo_total = 0.0
+    servicio_total = 0.0
+    vol_total_cargado = 0.0
+    peso_total_cargado = 0.0
+    
+    for vehiculo in flota:
+        for b in vehiculo.bloques:
+            t_sal = b.t_salida
+            t_ret = b.t_retorno
+            tiempo_total_ruta_min += (t_ret - t_sal)
+            viaje_efectivo_total += float(b.dc.get("t_viaje_efectivo_min", 0))
+            servicio_total += float(b.dc.get("t_servicio_total_min", 0))
+    
+    tiempo_total_ruta_h = tiempo_total_ruta_min / 60.0
+    
+    # Volumen y peso total cargado (de todos los nodos visitados)
+    for d in detalle_nodos_global.values():
+        vol_total_cargado += float(d.get("volumen_cm3", 0))
+        peso_total_cargado += float(d.get("peso_g", 0))
+    
+    # Capacidades totales disponibles (por cada bloque/turno usado)
+    cap_vol_por_turno = 3_750_000  # cm3
+    cap_peso_por_turno = 803_333.33  # g
+    total_turnos_usados = sum(len(v.bloques) for v in flota if v.bloques)
+    cap_vol_total = cap_vol_por_turno * total_turnos_usados if total_turnos_usados > 0 else 1
+    cap_peso_total = cap_peso_por_turno * total_turnos_usados if total_turnos_usados > 0 else 1
+    
+    pct_util_vol = (vol_total_cargado / cap_vol_total) * 100
+    pct_util_peso = (peso_total_cargado / cap_peso_total) * 100
+    pct_util_promedio = (pct_util_vol + pct_util_peso) / 2.0
+    
+    # Desviación media de carga (kg)
+    cargas_por_turno_kg = []
+    for vehiculo in flota:
+        for b in vehiculo.bloques:
+            carga_turno = sum(float(detalle_nodos_global.get(nodo, {}).get("peso_g", 0)) for nodo in b.ruta) / 1000.0
+            cargas_por_turno_kg.append(carga_turno)
+    desviacion_media_carga_kg = float(pd.Series(cargas_por_turno_kg).std()) if cargas_por_turno_kg else 0.0
+    
+    # Tasa de desocupación
+    tasa_desocupacion = (espera_total_global / (viaje_efectivo_total + servicio_total)) * 100 if (viaje_efectivo_total + servicio_total) > 0 else 0
+    
+    # Emisiones CO2 (Factor: 2.68 kg CO2/litro diesel, rendimiento 6.5 km/litro para camión urbano)
+    rendimiento_km_por_litro = 6.5
+    factor_co2_kg_por_litro = 2.68 if rendimiento_km_por_litro > 0 else 0
+    dist_total_km = dist_total_global / 1000.0
+    litros_consumidos = dist_total_km / rendimiento_km_por_litro
+    co2_total_kg = litros_consumidos * factor_co2_kg_por_litro
+    co2_por_pedido_kg = co2_total_kg / total_clientes if total_clientes > 0 else 0
+    
+    # Pedidos no atendidos (backlog) — outliers del clustering que no entraron
+    total_pedidos_input = len(df_filtro[df_filtro['id_nodo'] != depot_id]) if 'id_nodo' in df_filtro.columns else len(df_filtro)
+    pedidos_no_atendidos = total_pedidos_input - total_clientes
+    pct_backlog = (pedidos_no_atendidos / total_pedidos_input * 100) if total_pedidos_input > 0 else 0
+    
+    # Función objetivo compuesta
+    penalizacion_espera = espera_total_global  # Se reporta sin multiplicar por alpha (valor crudo)
+    fo_costo_ruta = costo_total_global
+    fo_total = fo_costo_ruta + penalizacion_espera
+    
+    kpis = {
+        "KPI": [
+            "Función Objetivo Total",
+            "Costo de Ruta (F.O. componente transporte)",
+            "Penalización por Espera Total (min)",
+            "Distancia Total Recorrida (km)",
+            "Distancia Relativa (km/pedido)",
+            "Vehículos Utilizados",
+            "Vehículos en Desuso",
+            "Capacidad Flota Fija",
+            "Tiempo Total en Ruta (horas)",
+            "% Entregas a Tiempo",
+            "Tardanza Promedio (min)",
+            "% Pedidos No Atendidos (Backlog)",
+            "Pedidos No Atendidos (qty)",
+            "% Utilización Promedio Capacidad Vehículos",
+            "% Utilización Volumen",
+            "% Utilización Peso",
+            "Desviación Media de Carga (kg)",
+            "Tasa de Desocupación (%)",
+            "Espera Total Acumulada (min)",
+            "Emisiones CO2 Totales (kg)",
+            "Emisiones CO2 por Pedido (kg)",
+            "Litros Diesel Estimados"
+
+        ],
+        "Valor": [
+            round(fo_total, 2),
+            round(fo_costo_ruta, 2),
+            round(penalizacion_espera, 1),
+            round(dist_total_km, 2),
+            round(dist_total_km / total_clientes, 2) if total_clientes > 0 else 0,
+            vehiculos_usados,
+            max_vehiculos - vehiculos_usados,
+            max_vehiculos,
+            round(tiempo_total_ruta_h, 2),
+            round(pct_entregas_a_tiempo, 1),
+            round(tardanza_promedio, 1),
+            round(pct_backlog, 1),
+            pedidos_no_atendidos,
+            round(pct_util_promedio, 1),
+            round(pct_util_vol, 1),
+            round(pct_util_peso, 1),
+            round(desviacion_media_carga_kg, 2),
+            round(tasa_desocupacion, 1),
+            round(espera_total_global, 1),
+            round(co2_total_kg, 2),
+            round(co2_por_pedido_kg, 3),
+            round(litros_consumidos, 2)
+        ]
+    }
+    
+    df_kpis = pd.DataFrame(kpis)
+    csv_kpis = os.path.join(out_dir, f'kpis_{tipo_algoritmo.lower().replace(" ", "")}_{fecha_target}.csv')
+    df_kpis.to_csv(csv_kpis, index=False, encoding='utf-8-sig')
+    print(f"[Gestor Flota] KPIs guardados en: {csv_kpis}")
+    
+    # === CSV 4: Clientes Atendidos ===
+    # Construir mapeo inverso nodo → cluster desde los resultados de optimización
+    nodo_a_cluster = {}
+    for cluster_id, dict_out in resultados_clusters.items():
+        for ruta in dict_out.get("rutas", []):
+            for nodo in ruta:
+                nodo_a_cluster[nodo] = cluster_id
+    
+    nodos_atendidos = set(detalle_nodos_global.keys())
+    filas_clientes = []
+    
+    for _, row in df_filtro.iterrows():
+        id_nodo = row.get('id_nodo', '')
+        if id_nodo == depot_id:
+            continue
         
-    out_file = os.path.join(out_dir, f'ruta_flotaglobal_{tipo_algoritmo.lower().replace(" ", "")}_{fecha_target}.md')
-    with open(out_file, 'w', encoding='utf-8') as f:
-        f.write(md)
+        lat = float(row.get('latitud', 0.0))
+        lng = float(row.get('longitud', 0.0))
         
-    print(f"\n[Gestor Flota] Flota mapeada y reporte Markdown guardado en: {out_file}")
+        # Cluster desde el mapeo inverso de resultados
+        cluster_asignado = nodo_a_cluster.get(id_nodo, 'Sin Cluster (Outlier)')
+        
+        atendido = "Sí" if id_nodo in nodos_atendidos else "No"
+        
+        filas_clientes.append({
+            "id_nodo": id_nodo,
+            "Cluster": cluster_asignado,
+            "Latitud": lat,
+            "Longitud": lng,
+            "Atendido": atendido,
+            "Fecha": fecha_target
+        })
+    
+    df_clientes = pd.DataFrame(filas_clientes)
+    csv_clientes = os.path.join(out_dir, f'clientes_atendidos_{tipo_algoritmo.lower().replace(" ", "")}_{fecha_target}.csv')
+    df_clientes.to_csv(csv_clientes, index=False, encoding='utf-8-sig')
+    print(f"[Gestor Flota] Clientes atendidos guardado en: {csv_clientes}")
     
     if G is not None and rutas_dict_global is not None:
         if mapa_dir is None:
@@ -279,4 +478,4 @@ def asignar_y_reportar(
             depot_coords=depot_coords
         )
     
-    return md
+    return df_resumen, df_detalle

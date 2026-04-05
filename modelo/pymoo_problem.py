@@ -22,7 +22,7 @@ from modelo.funciones.tiempos_viaje import tau_ij_vec
 class TDVRPTWProblem(ElementwiseProblem):
     def __init__(self, df_cluster, matriz_dist_m, depot_id, 
                  t_inicio=540.0, cap_vol_cm3=10_000_000, cap_peso_g=5_000_000, 
-                 dia_semana=0, factor_s=1.2, d_max_min=300.0):
+                 dia_semana=0, factor_s=1.2, d_max_min=300.0, alpha_espera=1.0):
         
         self.df_cluster = df_cluster.copy()
         
@@ -65,10 +65,11 @@ class TDVRPTWProblem(ElementwiseProblem):
         self.factor_s = factor_s
         self.aten_fijo = 5.0 # Minutos de atención
         self.d_max_min = d_max_min # Límite de 5 horas máximo (Restricción 14)
+        self.alpha_espera = alpha_espera # Peso de penalización por tiempo de espera
         
         # ElementwiseProblem configurado:
         # n_var = permutación de índices de [0... n_clientes-1]
-        # n_obj = 1 (Minimizar F: distancia total * S)
+        # n_obj = 1 (Minimizar F: distancia total * S + penalización espera)
         # n_ieq_constr = 1 (Sumatoria de todas las roturas hard en tiempo y capacidad)
         
         super().__init__(n_var=n_clientes, 
@@ -96,6 +97,7 @@ class TDVRPTWProblem(ElementwiseProblem):
         
         dist_total_m = 0.0
         restricciones_fail = 0.0 # Acumulador de penalizaciones g(x) <= 0
+        espera_total = 0.0 # Acumulador de espera total para penalización en F
         
         vol_actual = 0.0
         peso_actual = 0.0
@@ -144,22 +146,24 @@ class TDVRPTWProblem(ElementwiseProblem):
                 cam_t_viaje += t_viaje_reg
                 cam_dist += dist_reg
                 dist_total_m += dist_reg
-                detalle_camiones.append({
-                    "t_viaje_efectivo_min": cam_t_viaje,
-                    "t_espera_total_min": cam_t_espera,
-                    "t_servicio_total_min": cam_t_servicio,
-                    "dist_total_m": cam_dist,
-                    "t_salida_deposito": cam_t_salida,
-                    "t_retorno_deposito": t_actual + t_viaje_reg,
-                    "n_clientes": len(ruta_act),
-                    "dist_retorno_m": dist_reg,
-                    "t_viaje_retorno_min": t_viaje_reg,
-                    "id_camion_fisico": num_camiones_fisicos,
-                    "turno_operacion": "Mañana" if turno_idx == 0 else "Tarde",
-                    "subconjunto_k": f"K{plantilla_idx+1}{turno_idx+1}"
-                })
                 
-                rutas_camiones.append(ruta_act)
+                # Solo registrar el turno si tuvo al menos 1 cliente
+                if ruta_act:
+                    detalle_camiones.append({
+                        "t_viaje_efectivo_min": cam_t_viaje,
+                        "t_espera_total_min": cam_t_espera,
+                        "t_servicio_total_min": cam_t_servicio,
+                        "dist_total_m": cam_dist,
+                        "t_salida_deposito": cam_t_salida,
+                        "t_retorno_deposito": t_actual + t_viaje_reg,
+                        "n_clientes": len(ruta_act),
+                        "dist_retorno_m": dist_reg,
+                        "t_viaje_retorno_min": t_viaje_reg,
+                        "id_camion_fisico": num_camiones_fisicos,
+                        "turno_operacion": "Mañana" if turno_idx == 0 else "Tarde",
+                        "subconjunto_k": f"K{plantilla_idx+1}{turno_idx+1}"
+                    })
+                    rutas_camiones.append(ruta_act)
                 
                 # LÓGICA MULTI-VIAJE (K11->K12 o K21->K22)
                 turno_idx += 1
@@ -213,11 +217,11 @@ class TDVRPTWProblem(ElementwiseProblem):
                 t_violacion = t_inicio_servicio - b_p
                 restricciones_fail += t_violacion
             
-            # Acumular tiempos del camión
             cam_t_viaje += t_viaje
             cam_t_espera += t_espera
             cam_t_servicio += self.aten_fijo
             cam_dist += dist_arco
+            espera_total += t_espera  # Acumular espera global para penalización en F
             
             detalle_nodos[cliente_id] = {
                 "t_salida_anterior": t_actual,
@@ -279,7 +283,8 @@ class TDVRPTWProblem(ElementwiseProblem):
         # en un array numpy para la población completa, y las claves con shapes
         # variables (listas de rutas, dicts) provocan errores de forma inhomogénea.
         costo_vehiculos = num_camiones_fisicos * self.costo_fijo_camion
-        out["F"] = np.array([(dist_total_m * self.factor_s) + costo_vehiculos])
+        penalizacion_espera = self.alpha_espera * espera_total
+        out["F"] = np.array([(dist_total_m * self.factor_s) + costo_vehiculos + penalizacion_espera])
         out["G"] = np.array([restricciones_fail])
         
         # Datos extra se guardan en instancia para consulta posterior

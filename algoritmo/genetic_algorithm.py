@@ -44,7 +44,8 @@ def optimizar_pymoo_ga(cluster_idx, df_cluster, matriz_dist, depot_id, dia_seman
         cap_vol_cm3=3750000, 
         cap_peso_g=803333.333333333,
         factor_s=0.94,
-        dia_semana=dia_semana
+        dia_semana=dia_semana,
+        alpha_espera=500.0  # Penalización por minuto de espera (balanceado vs costo_fijo_camion=100k)
     )
 
     if n_clientes == 0:
@@ -56,7 +57,7 @@ def optimizar_pymoo_ga(cluster_idx, df_cluster, matriz_dist, depot_id, dia_seman
 
     # 2. Configurar Algoritmo GA de Permutación
     algorithm = GA(
-        pop_size=50,
+        pop_size=100,
         sampling=PermutationRandomSampling(),
         crossover=OrderCrossover(),
         mutation=InversionMutation(),
@@ -75,7 +76,60 @@ def optimizar_pymoo_ga(cluster_idx, df_cluster, matriz_dist, depot_id, dia_seman
     )
     
     if res.X is None:
-        raise ValueError(f"El GA de PyMoo no pudo hallar soluciones factibles para el clúster {cluster_idx}. Las Hard Constraints no se cumplieron.")
+        # === DIAGNÓSTICO DE INFACTIBILIDAD ===
+        print(f"\n      ⚠️  [INFACTIBLE] Clúster {cluster_idx}: No se encontró solución factible en {res.algorithm.n_gen} generaciones.")
+        print(f"      Analizando la mejor solución infactible de la población final...\n")
+        
+        # Obtener el individuo con menor constraint violation de la última población
+        pop = res.pop
+        if pop is not None and len(pop) > 0:
+            cv_arr = pop.get("CV").flatten()
+            best_infeasible_idx = cv_arr.argmin()
+            best_x = pop.get("X")[best_infeasible_idx]
+            best_cv = cv_arr[best_infeasible_idx]
+            best_f = pop.get("F")[best_infeasible_idx].flat[0]
+            
+            print(f"      Mejor individuo infactible: F = {best_f:.2f} | CV (violación total) = {best_cv:.2f}")
+            
+            # Re-evaluar para obtener detalles granulares
+            detalles = problem.evaluar_completo(best_x)
+            detalle_nodos = detalles.get("detalle_nodos", {})
+            detalle_camiones = detalles.get("detalle_camiones", [])
+            
+            # --- Violaciones de Ventana de Tiempo ---
+            nodos_violados = {nid: d for nid, d in detalle_nodos.items() if not d.get("cumple_ventana", True)}
+            if nodos_violados:
+                print(f"\n      ❌ VIOLACIONES DE VENTANA DE TIEMPO ({len(nodos_violados)} nodos):")
+                for nid, d in nodos_violados.items():
+                    t_llegada = d.get("t_inicio_servicio", 0)
+                    b_v = d.get("b_ventana", 1440)
+                    viola = d.get("t_violacion_min", 0)
+                    h_lleg = f"{int(t_llegada)//60:02d}:{int(t_llegada)%60:02d}"
+                    h_cierre = f"{int(b_v)//60:02d}:{int(b_v)%60:02d}"
+                    print(f"        - {nid}: Servicio a las {h_lleg} | Cierre ventana: {h_cierre} | Exceso: {viola:.0f} min")
+            else:
+                print(f"\n      ✅ Ventanas de tiempo: Sin violaciones.")
+            
+            # --- Resumen de esperas excesivas ---
+            nodos_espera = {nid: d for nid, d in detalle_nodos.items() if d.get("t_espera_min", 0) > 30}
+            if nodos_espera:
+                espera_total = sum(d["t_espera_min"] for d in nodos_espera.values())
+                print(f"\n      ⏳ ESPERAS EXCESIVAS (>30 min) en {len(nodos_espera)} nodos | Total: {espera_total:.0f} min")
+                for nid, d in nodos_espera.items():
+                    print(f"        - {nid}: {d['t_espera_min']:.0f} min de espera")
+            
+            # --- Camiones utilizados ---
+            n_camiones = len(detalle_camiones)
+            print(f"\n      🚚 Camiones requeridos: {n_camiones}")
+            for i, dc in enumerate(detalle_camiones):
+                h_sal = f"{int(dc['t_salida_deposito'])//60:02d}:{int(dc['t_salida_deposito'])%60:02d}"
+                h_ret = f"{int(dc['t_retorno_deposito'])//60:02d}:{int(dc['t_retorno_deposito'])%60:02d}"
+                print(f"        Camión {i+1} ({dc.get('subconjunto_k','?')}): {h_sal} → {h_ret} | {dc.get('n_clientes',0)} clientes | {dc.get('dist_total_m',0)/1000:.1f} km")
+            
+            print(f"\n      Restricción total acumulada (CV): {best_cv:.2f} minutos de infactibilidad.")
+            print(f"      Sugerencia: Aumentar pop_size, n_gen, o relajar restricciones de capacidad/tiempo.\n")
+        
+        raise ValueError(f"El GA de PyMoo no pudo hallar soluciones factibles para el clúster {cluster_idx}. CV mínimo alcanzado: {best_cv:.2f}")
         
     f_val = float(res.F.flat[0])
     cv_val = float(res.CV.flat[0]) if res.CV is not None else 0.0
