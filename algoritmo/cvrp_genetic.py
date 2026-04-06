@@ -54,7 +54,7 @@ def resolver_cluster_cvrp(cluster_idx, df_cluster, matriz_dist, depot_id, cap_pe
     )
     
     algorithm = GA(
-        pop_size=100,
+        pop_size=50,
         sampling=PermutationRandomSampling(),
         crossover=OrderCrossover(),
         mutation=InversionMutation(),
@@ -65,7 +65,7 @@ def resolver_cluster_cvrp(cluster_idx, df_cluster, matriz_dist, depot_id, cap_pe
     res = minimize(
         problem,
         algorithm,
-        termination=('n_gen', 700),
+        termination=('n_gen', 200),
         seed=42,
         verbose=False,
         save_history=False
