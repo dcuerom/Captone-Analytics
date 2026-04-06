@@ -292,7 +292,8 @@ def plot_global_flota_interactive(
     coord_dict = {}
     if not df_global.empty:
         for _, row in df_global.iterrows():
-            coord_dict[row['id_nodo']] = (float(row['latitud']), float(row['longitud']))
+            if pd.notna(row.get('latitud')) and pd.notna(row.get('longitud')):
+                coord_dict[row['id_nodo']] = (float(row['latitud']), float(row['longitud']))
             
     if not coord_dict:
         print("Atención: No hay nodos para graficar globalmente.")

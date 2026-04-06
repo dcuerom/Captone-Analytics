@@ -179,12 +179,12 @@ def run_clustering_pipeline(
     X, df_clean = build_feature_matrix(df, time_column=time_column, default_window_start_hour=9)
     
     # 2. Normalización (alpha=1.0 por defecto, pero escalable)
-    X_scaled, _ = normalize_and_weight(X, alpha_time=3.0)
+    X_scaled, _ = normalize_and_weight(X, alpha_time=10.0)
     
     # 3. DBSCAN
     # Nota: Los hiperparámetros eps y min_samples requieren calibración 
     # según la densidad de la ciudad y el tamaño de la flota.
-    labels = run_dbscan(X_scaled, eps=0.4, min_samples=3)
+    labels = run_dbscan(X_scaled, eps=0.3, min_samples=3)
     
     # 4. Gestión
     clusters_dict, outliers = manage_clusters_and_noise(
