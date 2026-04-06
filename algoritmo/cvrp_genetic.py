@@ -14,7 +14,6 @@ base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.append(base_dir)
 
 from grafo.cvrp_parser import parse_cvrp_instance
-from grafo.cvrp_clustering import run_euclidean_agglomerative_clustering
 from grafo.cvrp_grafo import calculate_euclidean_routing
 from modelo.cvrp_pymoo_problem import CVRPEuclideanProblem
 
@@ -205,34 +204,28 @@ def disparar_rutina_cvrp_clasico(vrp_filepath: str):
     
     df_depot = df_nodos[df_nodos['id_nodo'] == depot_id].copy()
 
-    clusters_dict, outliers = run_euclidean_agglomerative_clustering(
-        df=df_nodos[df_nodos['id_nodo'] != depot_id], 
-        df_depot=df_depot, 
-        n_clusters=k_trucks
-    )
-
     out_dir = os.path.join(base_dir, 'resultados', 'cvrp')
     os.makedirs(out_dir, exist_ok=True)
     
     resultados_globales = {}
     dist_total_modelo = 0.0
     
-    for cluster_id, df_cluster_latlon in clusters_dict.items():
+    df_clientes = df_nodos[df_nodos['id_nodo'] != depot_id]
         
-        matriz_dist, _ = calculate_euclidean_routing(df_cluster_latlon, df_depot)
+    matriz_dist, _ = calculate_euclidean_routing(df_clientes, df_depot)
         
-        dict_out = resolver_cluster_cvrp(
-            cluster_id, 
-            df_cluster_latlon, 
-            matriz_dist, 
-            depot_id, 
-            cap_peso,
-            df_nodos,
-            k_trucks
-        )
+    dict_out = resolver_cluster_cvrp(
+        "Global", 
+        df_clientes, 
+        matriz_dist, 
+        depot_id, 
+        cap_peso,
+        df_nodos,
+        k_trucks
+    )
         
-        dist_total_modelo += dict_out["costo_total"]
-        resultados_globales[cluster_id] = dict_out
+    dist_total_modelo += dict_out["costo_total"]
+    resultados_globales["Global"] = dict_out
 
     end_time = time.time()
     elapsed_time = end_time - start_time
