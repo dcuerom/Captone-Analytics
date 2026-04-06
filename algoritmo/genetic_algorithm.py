@@ -157,7 +157,7 @@ def disparar_rutina_ga():
         print("CSV de datos no encontrado en DatosSimulados.")
         return
         
-    fecha_target = '2026-12-03'
+    fecha_target = '2026-12-05'
     # Extraer dinámicamente el día de la semana (0=Lunes, 6=Domingo)
     dia_semana_target = pd.to_datetime(fecha_target).weekday()
     
