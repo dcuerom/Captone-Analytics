@@ -26,6 +26,22 @@ from pymoo.operators.crossover.ox import OrderCrossover
 from pymoo.operators.mutation.inversion import InversionMutation
 from pymoo.operators.sampling.rnd import PermutationRandomSampling
 from pymoo.optimize import minimize
+from pymoo.core.sampling import Sampling
+import concurrent.futures
+
+from algoritmo.savings import clarke_wright_savings
+
+class SavingsSeededSampling(Sampling):
+    def __init__(self, savings_seed, n_clientes):
+        super().__init__()
+        self.savings_seed = savings_seed
+        self.n_clientes = n_clientes
+
+    def _do(self, problem, n_samples, **kwargs):
+        X = np.array([np.random.permutation(self.n_clientes) for _ in range(n_samples)])
+        if self.savings_seed is not None and len(self.savings_seed) == self.n_clientes:
+            X[0] = self.savings_seed
+        return X
 
 def optimizar_pymoo_ga(cluster_idx, df_cluster, matriz_dist, depot_id, dia_semana=0):
     """
@@ -55,17 +71,26 @@ def optimizar_pymoo_ga(cluster_idx, df_cluster, matriz_dist, depot_id, dia_seman
     if n_clientes == 1:
         return problem.evaluar_completo([0])
 
-    # 2. Configurar Algoritmo GA de Permutación
+    # 2. Heurística de Ahorros
+    print(f"      [{cluster_idx}] Calculando Ahorros (Clarke-Wright) para semilla inicial...")
+    savings_route_ids = clarke_wright_savings(
+        df_cluster, matriz_dist, depot_id, 
+        cap_vol_cm3=3750000, cap_peso_g=803333.333333333, d_max_min=300.0, speed_kmh=25.0
+    )
+    id_to_idx = {cid: i for i, cid in enumerate(clientes)}
+    savings_route_idx = np.array([id_to_idx[cid] for cid in savings_route_ids]) if savings_route_ids else None
+
+    # 3. Configurar Algoritmo GA de Permutación con Semilla
     algorithm = GA(
         pop_size=100,
-        sampling=PermutationRandomSampling(),
+        sampling=SavingsSeededSampling(savings_seed=savings_route_idx, n_clientes=n_clientes),
         crossover=OrderCrossover(),
         mutation=InversionMutation(),
         eliminate_duplicates=False  # Desactivado: evita error numpy inhomogeneous con permutaciones
     )
     
-    print("      Iniciando Minimize de PyMoo...")
-    # 3. Minimización
+    print(f"      [{cluster_idx}] Iniciando Minimize de PyMoo...")
+    # 4. Minimización
     res = minimize(
         problem,
         algorithm,
@@ -189,19 +214,27 @@ def disparar_rutina_ga():
     MAX_CAMIONES_GLOBALES = 20  # <--- Parámetro solicitado para la flota estática total
     resultados_globales = {}
     
+    tasks = []
     for cluster_id, matriz_dist in matrices_km_o_m.items():
-        print(f"\n[PyMoo] Optimizando Cluster {cluster_id} con {len(matriz_dist)-1} clientes...")
-        try:
-            dict_out = optimizar_pymoo_ga(cluster_id, df_filtro, matriz_dist, depot_id, dia_semana=dia_semana_target)
-            
-            rutas_asignadas  = dict_out["rutas"]
-            resultados_globales[cluster_id] = dict_out
+        tasks.append((cluster_id, df_filtro, matriz_dist, depot_id, dia_semana_target))
 
-            
-            pass
-            
-        except Exception as e:
-            print(f"Error procesando {cluster_id}: {e}")
+    max_w = os.cpu_count() or 1
+    print(f"\n[PyMoo] Iniciando procesamiento paralelo de clústeres con {max_w} workers...")
+    
+    with concurrent.futures.ProcessPoolExecutor(max_workers=max_w) as executor:
+        future_to_cluster = {
+            executor.submit(optimizar_pymoo_ga, *task): task[0]
+            for task in tasks
+        }
+        
+        for future in concurrent.futures.as_completed(future_to_cluster):
+            cluster_id = future_to_cluster[future]
+            try:
+                dict_out = future.result()
+                resultados_globales[cluster_id] = dict_out
+                print(f"[PyMoo] Cluster {cluster_id} Finalizado.")
+            except Exception as e:
+                print(f"Error procesando {cluster_id}: {e}")
             
     # LLAMADA AL GESTOR DE FLOTA GLOBAL
     asignar_y_reportar(
@@ -210,7 +243,7 @@ def disparar_rutina_ga():
         df_filtro=df_filtro,
         depot_id=depot_id,
         fecha_target=fecha_target,
-        tipo_algoritmo="Genético PyMoo",
+        tipo_algoritmo="Hibrido Savings GA",
         out_dir=out_dir,
         rutas_dict_global=rutas_dict,
         G=G,

@@ -23,8 +23,9 @@ Una vez el Grafo resolvió los *dónde* y *a cuántos metros de calle* están lo
 - Contiene además, subalgoritmos analíticos en `funciones/tiempos_viaje.py` parametrizados para inflar matemáticamente la duración en base a perfiles de hora punta de tráfico ($D_{ij} \times \text{Función}(\tau)$).
 
 ### 3. Solución (Módulo: `algoritmo/`)
-- Intercepta el problema configurado de forma independiente y, usando la librería `PyMoo` sobre `genetic_algorithm.py`, hace divergir e iterar 50 cromosomas (rutas de clientes) a través de "selección de ruleta", y cruzas inteligentes sin duplicación de nodos.
-- Luego de decenas de generaciones (mutando caminos locamente), extrae las topologías supremas y menos erráticas para el Clúster $K_i$.
+- Intercepta el problema de forma independiente para cada clúster utilizando procesamiento en paralelo (`ProcessPoolExecutor`) optimizando todos los clústeres simultáneamente y aprovechando la arquitectura multi-core.
+- Aplica un paradigma híbrido: primero construye heurísticamente una solución factible inteligente vía **Ahorros de Clarke-Wright (Savings)** en `savings.py`, previniendo infactibilidades.
+- Luego, inyecta esta súper-semilla constructiva como base del **Algoritmo Genético** en `genetic_algorithm.py` a través de la librería `PyMoo`. A partir de esa semilla y otras rutas aleatorias, itera 200 generaciones extrayendo las topologías supremas para el Clúster $K_i$.
 
 ### 4. Empaquetamiento Real (Módulo: `gestion_flota/`)
 - A pesar de que la optimización se hace parceladamente en `PyMoo`, las empresas tienen una cantidad **Fija** y centralizada de vehículos.
