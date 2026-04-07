@@ -13,6 +13,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from gestion_flota.gestor import asignar_y_reportar
 import pandas as pd
 import numpy as np
+import time
 
 base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.append(base_dir)
@@ -61,7 +62,7 @@ def optimizar_pymoo_ga(cluster_idx, df_cluster, matriz_dist, depot_id, dia_seman
         cap_peso_g=803333.333333333,
         factor_s=0.94,
         dia_semana=dia_semana,
-        alpha_espera=500.0  # Penalización por minuto de espera (balanceado vs costo_fijo_camion=100k)
+        alpha_espera=1000.0  # Penalización por minuto de espera (balanceado vs costo_fijo_camion=100k)
     )
 
     if n_clientes == 0:
@@ -82,10 +83,10 @@ def optimizar_pymoo_ga(cluster_idx, df_cluster, matriz_dist, depot_id, dia_seman
 
     # 3. Configurar Algoritmo GA de Permutación con Semilla
     algorithm = GA(
-        pop_size=100,
+        pop_size=50,
         sampling=SavingsSeededSampling(savings_seed=savings_route_idx, n_clientes=n_clientes),
         crossover=OrderCrossover(),
-        mutation=InversionMutation(),
+        mutation=InversionMutation(prob=0.3),
         eliminate_duplicates=False  # Desactivado: evita error numpy inhomogeneous con permutaciones
     )
     
@@ -94,7 +95,7 @@ def optimizar_pymoo_ga(cluster_idx, df_cluster, matriz_dist, depot_id, dia_seman
     res = minimize(
         problem,
         algorithm,
-        termination=('n_gen', 200),
+        termination=('n_gen', 300),
         seed=42,
         verbose=False,
         save_history=False
@@ -174,6 +175,7 @@ def min_a_hora(minutos: float) -> str:
 
 def disparar_rutina_ga():
     print("=== INICIANDO TDVRPTW - GA OFICIAL PYMOO ===")
+    t0 = time.time()
     
     data_path = os.path.join(base_dir, 'DatosSimulados', 'df_despacho.csv')
     try:
@@ -236,6 +238,9 @@ def disparar_rutina_ga():
             except Exception as e:
                 print(f"Error procesando {cluster_id}: {e}")
             
+    t1 = time.time()
+    tiempo_total_min = (t1 - t0) / 60.0
+
     # LLAMADA AL GESTOR DE FLOTA GLOBAL
     asignar_y_reportar(
         resultados_clusters=resultados_globales,
@@ -248,7 +253,8 @@ def disparar_rutina_ga():
         rutas_dict_global=rutas_dict,
         G=G,
         mapa_dir=mapa_dir,
-        depot_coords=depot_coords
+        depot_coords=depot_coords,
+        tiempo_computo_min=tiempo_total_min
     )
         
     print(f"\n[Éxito] Optimización y Asignación de Flota finalizada.")

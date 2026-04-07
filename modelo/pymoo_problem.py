@@ -79,10 +79,11 @@ class TDVRPTWProblem(ElementwiseProblem):
                          xu=n_clientes - 1, 
                          vtype=int)
 
-        # Plantillas de rotación de turnos (K11, K12, K21, K22)
-        self.plantillas_turnos = [
-            [540.0, 900.0],   # Plantilla K1 (K11, K12): Salida 09:00, 15:00
-            [660.0, 1020.0]   # Plantilla K2 (K21, K22): Salida 11:00, 17:00
+        # Plantillas de ventanas de salida (K11, K12, K21, K22)
+        # El modelo permite salir en cualquier momento dentro de estos rangos.
+        self.ventanas_salida_turnos = [
+            [[540.0, 720.0], [900.0, 1080.0]],   # Plantilla K1: Mañana [09:00-12:00], Tarde [15:00-18:00]
+            [[660.0, 840.0], [1020.0, 1200.0]]   # Plantilla K2: Mañana [11:00-14:00], Tarde [17:00-20:00]
         ]
         self.costo_fijo_camion = 100_000.0 # Castigo por usar un nuevo camión físico
         
@@ -107,9 +108,12 @@ class TDVRPTWProblem(ElementwiseProblem):
         
         num_camiones_fisicos = 1
         plantilla_idx = 0
-        turnos_actual = self.plantillas_turnos[plantilla_idx]
+        ventanas_actual = self.ventanas_salida_turnos[plantilla_idx]
         turno_idx = 0
-        cam_t_salida = turnos_actual[turno_idx]
+        
+        # El camión tiene libertad de salir en cualquier momento de la ventana.
+        # Por defecto, iniciamos en el tiempo más temprano (Earliest Departure).
+        cam_t_salida = ventanas_actual[turno_idx][0] 
         t_actual = cam_t_salida
         nodo_previo = self.depot_id
         detalle_nodos = {}
@@ -167,17 +171,17 @@ class TDVRPTWProblem(ElementwiseProblem):
                 
                 # LÓGICA MULTI-VIAJE (K11->K12 o K21->K22)
                 turno_idx += 1
-                if turno_idx < len(turnos_actual):
+                if turno_idx < len(ventanas_actual):
                     # El MISMO camión físico toma el siguiente turno
-                    cam_t_salida = turnos_actual[turno_idx]
+                    cam_t_salida = ventanas_actual[turno_idx][0]
                 else:
                     # El camión actual agotó sus turnos. Contrata un nuevo camión físico alternativo.
                     num_camiones_fisicos += 1
-                    plantilla_idx = (plantilla_idx + 1) % len(self.plantillas_turnos) # Alterna entre 0 y 1
-                    turnos_actual = self.plantillas_turnos[plantilla_idx]
+                    plantilla_idx = (plantilla_idx + 1) % len(self.ventanas_salida_turnos) # Alterna entre 0 y 1
+                    ventanas_actual = self.ventanas_salida_turnos[plantilla_idx]
                     
                     turno_idx = 0
-                    cam_t_salida = turnos_actual[turno_idx]
+                    cam_t_salida = ventanas_actual[turno_idx][0]
 
                 # Reseteo camión
                 vol_actual = 0.0

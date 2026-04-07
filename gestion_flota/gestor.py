@@ -66,7 +66,8 @@ def asignar_y_reportar(
     rutas_dict_global=None,
     G: Optional[nx.MultiDiGraph] = None,
     mapa_dir=None,
-    depot_coords=None
+    depot_coords=None,
+    tiempo_computo_min=0.0
 ):
     """
     1. Desempaqueta todos los resultados intra-cluster.
@@ -390,7 +391,8 @@ def asignar_y_reportar(
             "Espera Total Acumulada (min)",
             "Emisiones CO2 Totales (kg)",
             "Emisiones CO2 por Pedido (kg)",
-            "Litros Diesel Estimados"
+            "Litros Diesel Estimados",
+            "Tiempo de Cómputo (min)"
 
         ],
         "Valor": [
@@ -415,7 +417,8 @@ def asignar_y_reportar(
             round(espera_total_global, 1),
             round(co2_total_kg, 2),
             round(co2_por_pedido_kg, 3),
-            round(litros_consumidos, 2)
+            round(litros_consumidos, 2),
+            round(tiempo_computo_min, 2)
         ]
     }
     

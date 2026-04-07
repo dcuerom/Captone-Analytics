@@ -157,14 +157,14 @@ $$
 $$
 \text{10. Salida del CD - Turno 1 - Ruta 1:}\\
 
-ts_{0,k} + s_0 = 540 
+540 \leq ts_{0,k} + s_0 \leq 720 
  \ \ \forall k \in K_{11}
 $$
 
 $$
 \text{11. Salida del CD - Turno 1 - Ruta 2:}\\
 
-ts_{0,k} + s_0 = 900
+900 \leq ts_{0,k} + s_0 \leq 1080
  \ \ \forall k \in K_{12}
 $$
 
@@ -172,7 +172,7 @@ $$
 \text{12. Salida del CD - Turno 2 - Ruta 1:}\\
 
 \\
-ts_{0,k} + s_0 = 660 
+660 \leq ts_{0,k} + s_0 \leq 840
 
  \ \ \forall k \in K_{21}
 $$
@@ -181,7 +181,7 @@ $$
 \text{13. Salida del CD - Turno 2 - Ruta 2:}\\
 
 \\
-ts_{0,k} + s_0 = 1020
+1020 \leq ts_{0,k} + s_0 \leq 1200
 
  \ \ \forall k \in K_{22}
 $$
