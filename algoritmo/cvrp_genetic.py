@@ -125,7 +125,7 @@ def resolver_cluster_cvrp(cluster_idx, df_cluster, matriz_dist, depot_id, cap_pe
         problem,
         algorithm,
         termination=('n_gen', 350),
-        seed=42,
+        seed=None,
         verbose=False,
         save_history=False
     )
