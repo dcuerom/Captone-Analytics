@@ -1,0 +1,42 @@
+ID Físico,Turno,Cluster,Subconjunto,nodo,Hora Llegada,coordenadas,distancia_tramo,peso_tramo
+1,Mañana,Global,K11,DEPOT,09:00,N/A,0.0,0.0
+1,Mañana,Global,K11,14,09:13,"(84.0, 25.0)",51.04,16.0
+1,Mañana,Global,K11,18,09:24,"(91.0, 2.0)",24.04,19.0
+1,Mañana,Global,K11,20,09:30,"(93.0, 3.0)",2.24,24.0
+1,Mañana,Global,K11,32,09:36,"(98.0, 5.0)",5.39,9.0
+1,Mañana,Global,K11,22,09:43,"(98.0, 14.0)",9.0,12.0
+1,Mañana,Global,K11,8,09:56,"(84.0, 39.0)",28.65,16.0
+1,Mañana,Global,K11,DEPOT (RETORNO),10:10,N/A,37.05,0.0
+1,Tarde,Global,K12,DEPOT,15:00,N/A,0.0,0.0
+1,Tarde,Global,K12,31,15:03,"(85.0, 60.0)",16.28,14.0
+1,Tarde,Global,K12,17,15:10,"(88.0, 51.0)",9.49,18.0
+1,Tarde,Global,K12,7,15:24,"(58.0, 30.0)",36.62,12.0
+1,Tarde,Global,K12,29,15:38,"(23.0, 15.0)",38.08,15.0
+1,Tarde,Global,K12,5,15:46,"(13.0, 7.0)",12.81,19.0
+1,Tarde,Global,K12,12,15:53,"(5.0, 10.0)",8.54,14.0
+1,Tarde,Global,K12,9,16:02,"(14.0, 24.0)",16.64,6.0
+1,Tarde,Global,K12,19,16:09,"(19.0, 32.0)",9.43,1.0
+1,Tarde,Global,K12,DEPOT (RETORNO),16:34,N/A,76.84,0.0
+2,Mañana,Global,K21,DEPOT,11:00,N/A,0.0,0.0
+2,Mañana,Global,K21,28,11:06,"(57.0, 69.0)",25.96,20.0
+2,Mañana,Global,K21,30,11:20,"(20.0, 70.0)",37.01,2.0
+2,Mañana,Global,K21,16,11:29,"(1.0, 65.0)",19.65,22.0
+2,Mañana,Global,K21,11,11:38,"(3.0, 82.0)",17.12,8.0
+2,Mañana,Global,K21,26,11:47,"(9.0, 97.0)",16.16,24.0
+2,Mañana,Global,K21,6,11:57,"(29.0, 89.0)",21.54,7.0
+2,Mañana,Global,K21,21,12:08,"(50.0, 93.0)",21.38,8.0
+2,Mañana,Global,K21,DEPOT (RETORNO),12:21,N/A,36.24,0.0
+2,Tarde,Global,K22,DEPOT,17:00,N/A,0.0,0.0
+2,Tarde,Global,K22,25,17:07,"(61.0, 62.0)",25.24,24.0
+2,Tarde,Global,K22,15,17:13,"(61.0, 59.0)",3.0,3.0
+2,Tarde,Global,K22,23,17:36,"(5.0, 42.0)",58.52,4.0
+2,Tarde,Global,K22,10,17:42,"(2.0, 39.0)",4.24,16.0
+2,Tarde,Global,K22,24,18:04,"(42.0, 9.0)",50.0,8.0
+2,Tarde,Global,K22,3,18:12,"(50.0, 5.0)",8.94,21.0
+2,Tarde,Global,K22,4,18:18,"(49.0, 8.0)",3.16,6.0
+2,Tarde,Global,K22,27,18:39,"(80.0, 55.0)",56.3,2.0
+2,Tarde,Global,K22,DEPOT (RETORNO),18:49,N/A,21.1,0.0
+3,Mañana,Global,K11,DEPOT,09:00,N/A,0.0,0.0
+3,Mañana,Global,K11,2,09:09,"(96.0, 44.0)",34.93,19.0
+3,Mañana,Global,K11,13,09:16,"(98.0, 52.0)",8.25,21.0
+3,Mañana,Global,K11,DEPOT (RETORNO),09:28,N/A,28.84,0.0

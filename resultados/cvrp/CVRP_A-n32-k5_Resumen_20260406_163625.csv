@@ -1,0 +1,6 @@
+ID Físico Camión,Cluster,Clase K / Plantilla,Turno,Salida CD,Retorno CD,Viaje Efectivo (min),Dist Total,Clientes Atendidos,Peso,Tiempo Solución (segundos)
+1,Global,K11,Mañana,09:00,10:10,40.35,157.41,6,96.0,80.8
+1,Global,K12,Tarde,15:00,16:34,54.03,224.74,8,99.0,80.8
+2,Global,K21,Mañana,11:00,12:21,46.81,195.05,7,91.0,80.8
+2,Global,K22,Tarde,17:00,18:49,69.78,230.51,8,84.0,80.8
+3,Global,K11,Mañana,09:00,09:28,18.79,72.02,2,40.0,80.8

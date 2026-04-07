@@ -4,7 +4,9 @@ import pandas as pd
 import numpy as np
 import time
 from datetime import datetime
+from concurrent.futures import ProcessPoolExecutor, as_completed
 from pymoo.algorithms.soo.nonconvex.ga import GA
+from pymoo.core.sampling import Sampling
 from pymoo.operators.crossover.ox import OrderCrossover
 from pymoo.operators.mutation.inversion import InversionMutation
 from pymoo.operators.sampling.rnd import PermutationRandomSampling
@@ -14,8 +16,53 @@ base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.append(base_dir)
 
 from grafo.cvrp_parser import parse_cvrp_instance
+from grafo.cvrp_clustering import run_euclidean_agglomerative_clustering
 from grafo.cvrp_grafo import calculate_euclidean_routing
 from modelo.cvrp_pymoo_problem import CVRPEuclideanProblem
+from algoritmo.heuristica_construccion import generar_semilla_cw
+
+
+class HeuristicSampling(Sampling):
+    """
+    Muestreador híbrido para PyMoo.
+    - Individuo 0: semilla heurística de Clarke & Wright Savings.
+    - Individuos 1..pop_size-1: permutaciones aleatorias para diversidad genética.
+    """
+    def __init__(self, semilla_cw: np.ndarray):
+        super().__init__()
+        self.semilla_cw = semilla_cw
+
+    def _do(self, problem, n_samples, **kwargs):
+        n_var = problem.n_var
+        X = np.empty((n_samples, n_var), dtype=int)
+        # Primer individuo: ruta construida heurísticamente
+        X[0, :] = self.semilla_cw
+        # Resto: aleatorios para mantener diversidad
+        for i in range(1, n_samples):
+            X[i, :] = np.random.permutation(n_var)
+        return X
+
+def _resolver_worker(args):
+    """
+    Función de nivel de módulo requerida para compatibilidad con pickle
+    en multiproceso. Desempaqueta los argumentos y llama a resolver_cluster_cvrp.
+    """
+    cluster_id, df_cluster_latlon, df_depot, depot_id, cap_peso, df_nodos, k_trucks, k_trucks_cluster = args
+
+    from grafo.cvrp_grafo import calculate_euclidean_routing
+    matriz_dist, _ = calculate_euclidean_routing(df_cluster_latlon, df_depot)
+
+    dict_out = resolver_cluster_cvrp(
+        cluster_id,
+        df_cluster_latlon,
+        matriz_dist,
+        depot_id,
+        cap_peso,
+        df_nodos,
+        k_trucks_cluster
+    )
+    return cluster_id, dict_out
+
 
 def resolver_cluster_cvrp(cluster_idx, df_cluster, matriz_dist, depot_id, cap_peso, df_nodos, k_trucks):
     clientes = [id_n for id_n in matriz_dist.index if id_n != depot_id]
@@ -51,32 +98,50 @@ def resolver_cluster_cvrp(cluster_idx, df_cluster, matriz_dist, depot_id, cap_pe
         cap_peso=cap_peso,
         k_trucks=k_trucks
     )
-    
+
+    # --- Warm Start: Clarke & Wright Savings ---
+    print(f"      [Heurística] Ejecutando Clarke & Wright Savings para warm start...")
+    semilla_cw = generar_semilla_cw(
+        clientes_ids=problem.clientes_ids,
+        depot_id=depot_id,
+        matriz_dist=matriz_dist,
+        peso_dict=problem.peso_dict,
+        cap_peso=cap_peso
+    )
+
+    # pop_size debe ser >= n_clientes para que OrderCrossover opere correctamente
+    pop_size = max(50, n_clientes + 1)
+
     algorithm = GA(
-        pop_size=50,
-        sampling=PermutationRandomSampling(),
+        pop_size=pop_size,
+        sampling=HeuristicSampling(semilla_cw),
         crossover=OrderCrossover(),
         mutation=InversionMutation(),
         eliminate_duplicates=False
     )
     
-    print(f"      [PyMoo] Optimizando Cluster {cluster_idx} ({n_clientes} clientes)...")
+    print(f"      [PyMoo] Optimizando Cluster {cluster_idx} ({n_clientes} clientes) [Híbrido CW + GA]...")
     res = minimize(
         problem,
         algorithm,
-        termination=('n_gen', 200),
+        termination=('n_gen', 350),
         seed=42,
         verbose=False,
         save_history=False
     )
     
     if res.X is None:
-        raise ValueError(f"Fallo en GA PyMoo para clúster {cluster_idx}.")
-        
-    f_val = float(res.F.flat[0])
+        # Fallback: usar la semilla de Clarke & Wright como solución final
+        print(f"      [Advertencia] GA no convergió para cluster {cluster_idx}. Usando solución C&W como fallback.")
+        res_x = semilla_cw
+        f_val = float(problem.evaluar_completo(semilla_cw)["costo_total"])
+    else:
+        res_x = res.X
+        f_val = float(res.F.flat[0])
+
     print(f"      PyMoo Terminado. Distancia Óptima Aproximada = {f_val:.2f}")
     
-    dict_out = problem.evaluar_completo(res.X)
+    dict_out = problem.evaluar_completo(res_x)
     
     df_idx = df_nodos.set_index('id_nodo')
     for nodo_id, data in dict_out["detalle_nodos"].items():
@@ -204,28 +269,47 @@ def disparar_rutina_cvrp_clasico(vrp_filepath: str):
     
     df_depot = df_nodos[df_nodos['id_nodo'] == depot_id].copy()
 
+    clusters_dict, outliers = run_euclidean_agglomerative_clustering(
+        df=df_nodos[df_nodos['id_nodo'] != depot_id],
+        df_depot=df_depot,
+        n_clusters=k_trucks
+    )
+
     out_dir = os.path.join(base_dir, 'resultados', 'cvrp')
     os.makedirs(out_dir, exist_ok=True)
-    
+
     resultados_globales = {}
     dist_total_modelo = 0.0
-    
-    df_clientes = df_nodos[df_nodos['id_nodo'] != depot_id]
-        
-    matriz_dist, _ = calculate_euclidean_routing(df_clientes, df_depot)
-        
-    dict_out = resolver_cluster_cvrp(
-        "Global", 
-        df_clientes, 
-        matriz_dist, 
-        depot_id, 
-        cap_peso,
-        df_nodos,
-        k_trucks
-    )
-        
-    dist_total_modelo += dict_out["costo_total"]
-    resultados_globales["Global"] = dict_out
+
+    # Preparar argumentos para cada worker paralelo
+    n_total_clientes = len(df_nodos) - 1
+    worker_args = [
+        (
+            cluster_id,
+            df_cluster_latlon,
+            df_depot,
+            depot_id,
+            cap_peso,
+            df_nodos,
+            k_trucks,
+            max(1, round(k_trucks * len(df_cluster_latlon) / n_total_clientes))
+        )
+        for cluster_id, df_cluster_latlon in clusters_dict.items()
+    ]
+
+    n_workers = min(len(worker_args), os.cpu_count() or 4)
+    print(f"[Paralelo] Resolviendo {len(worker_args)} clusters en {n_workers} procesos simultáneos...")
+
+    with ProcessPoolExecutor(max_workers=n_workers) as executor:
+        futures = {executor.submit(_resolver_worker, args): args[0] for args in worker_args}
+        for future in as_completed(futures):
+            cluster_id = futures[future]
+            try:
+                cid, dict_out = future.result()
+                dist_total_modelo += dict_out["costo_total"]
+                resultados_globales[cid] = dict_out
+            except Exception as e:
+                print(f"  [Error] Cluster {cluster_id} falló con: {e}")
 
     end_time = time.time()
     elapsed_time = end_time - start_time
