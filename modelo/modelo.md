@@ -43,6 +43,7 @@ $K_{22}: \text{Subconjunto de camiones designados para el turno 2 y para la ruta
 - $d_{max}: \text{Duración máxima que puede tener una ruta}$
 - $M: \text{Número positivo suficientemente grande (Big-M)}$
 - $\alpha_w: \text{Peso de penalización por tiempo de espera en la función objetivo}$
+- $\Delta_{descanso}: \text{Tiempo de descanso obligatorio entre jornadas (2 horas = 120 min)}$
 
 ---
 
@@ -112,7 +113,7 @@ ts_{i,k} + s_i + aten + \sum_{t=1}^{T} (X_{(i,t),j,k} \cdot T_{ij,t}) - M(1-\sum
 $$
 
 $$
-\text{7. Ventanas de tiempo :}\\
+\text{7. Ventanas de tiempo (con relajación de 30 min en cierre):}\\
 
 \sum_{k=1}^{K} ts_{i,k} 
 
@@ -122,8 +123,9 @@ a_i \ , \ \ \forall i \in I
 \sum_{k=1}^{K} ts_{i,k} 
 
 \leq
-b_i \ , \ \ \forall i \in I
+b_i + 30 \ , \ \ \forall i \in I
 $$
+
 
 $$
 \text{8. Tiempo de atención en el intervalo:}\\
@@ -155,21 +157,21 @@ ts_{i,k}
 $$
 
 $$
-\text{10. Salida del CD - Turno 1 - Ruta 1:}\\
+\text{10. Salida del CD (JIT permitida dentro de ventana) - Turno 1 - Ruta 1:}\\
 
 540 \leq ts_{0,k} + s_0 \leq 720 
  \ \ \forall k \in K_{11}
 $$
 
 $$
-\text{11. Salida del CD - Turno 1 - Ruta 2:}\\
+\text{11. Salida del CD (JIT permitida dentro de ventana) - Turno 1 - Ruta 2:}\\
 
 900 \leq ts_{0,k} + s_0 \leq 1080
  \ \ \forall k \in K_{12}
 $$
 
 $$
-\text{12. Salida del CD - Turno 2 - Ruta 1:}\\
+\text{12. Salida del CD (JIT permitida dentro de ventana) - Turno 2 - Ruta 1:}\\
 
 \\
 660 \leq ts_{0,k} + s_0 \leq 840
@@ -178,7 +180,7 @@ $$
 $$
 
 $$
-\text{13. Salida del CD - Turno 2 - Ruta 2:}\\
+\text{13. Salida del CD (JIT permitida dentro de ventana) - Turno 2 - Ruta 2:}\\
 
 \\
 1020 \leq ts_{0,k} + s_0 \leq 1200
@@ -187,12 +189,9 @@ $$
 $$
 
 $$
-\text{14. Descansos:}\\
+\text{14. Duración Total del Turno:}\\
 
-\sum_{t=1}^{T}\sum_{j=1}^{I}\sum_{i=1}^{I} X_{(i,t),j,k}*T_{i,t,j}
-
-\leq
-d_{max} \ , \ \ \forall k \in K
+ts_{retorno,k}^{(R)} - ts_{0,k}^{(R)} \leq d_{max} \ , \ \ \forall R, \forall k \in K
 $$
 
 $$
@@ -255,3 +254,10 @@ $$
 
 | \bigcup_{c \in C} \{ \text{Camiones Físicos Activos en el instante } t \} | \le N_{total} \quad \forall t \in \text{Horizonte}
 $$
+
+$$
+\text{21. Descanso Obligatorio entre Jornadas para el mismo Camión Físico:} \\
+\\ \ \\
+ts_{0,k}^{(R_2)} \geq t_{retorno,k}^{(R_1)} + \Delta_{descanso} \quad \forall R_1, R_2 \in \text{Rutas consecutivas del camión } k
+$$
+

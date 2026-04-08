@@ -44,7 +44,7 @@ class SavingsSeededSampling(Sampling):
             X[0] = self.savings_seed
         return X
 
-def optimizar_pymoo_ga(cluster_idx, df_cluster, matriz_dist, depot_id, dia_semana=0):
+def optimizar_pymoo_ga(cluster_idx, df_cluster, matriz_dist, depot_id, dia_semana=0, holgura_ventana=30.0):
     """
     Ejecuta el Algoritmo Genético de PyMoo basado en Permutaciones
     sobre el problema ElementwiseProblem TDVRPTW.
@@ -62,7 +62,9 @@ def optimizar_pymoo_ga(cluster_idx, df_cluster, matriz_dist, depot_id, dia_seman
         cap_peso_g=803333.333333333,
         factor_s=0.94,
         dia_semana=dia_semana,
-        alpha_espera=1000.0  # Penalización por minuto de espera (balanceado vs costo_fijo_camion=100k)
+        alpha_espera=50000.0,  # Penalización por minuto de espera (balanceado vs costo_fijo_camion=100k)
+        d_max_min=240.0,       # Duración máxima estricta del turno completo (4 horas)
+        holgura_ventana=holgura_ventana
     )
 
     if n_clientes == 0:
@@ -76,14 +78,14 @@ def optimizar_pymoo_ga(cluster_idx, df_cluster, matriz_dist, depot_id, dia_seman
     print(f"      [{cluster_idx}] Calculando Ahorros (Clarke-Wright) para semilla inicial...")
     savings_route_ids = clarke_wright_savings(
         df_cluster, matriz_dist, depot_id, 
-        cap_vol_cm3=3750000, cap_peso_g=803333.333333333, d_max_min=300.0, speed_kmh=25.0
+        cap_vol_cm3=3750000, cap_peso_g=803333.333333333, d_max_min=240.0, speed_kmh=25.0
     )
     id_to_idx = {cid: i for i, cid in enumerate(clientes)}
     savings_route_idx = np.array([id_to_idx[cid] for cid in savings_route_ids]) if savings_route_ids else None
 
     # 3. Configurar Algoritmo GA de Permutación con Semilla
     algorithm = GA(
-        pop_size=50,
+        pop_size=70,
         sampling=SavingsSeededSampling(savings_seed=savings_route_idx, n_clientes=n_clientes),
         crossover=OrderCrossover(),
         mutation=InversionMutation(prob=0.3),
@@ -95,7 +97,7 @@ def optimizar_pymoo_ga(cluster_idx, df_cluster, matriz_dist, depot_id, dia_seman
     res = minimize(
         problem,
         algorithm,
-        termination=('n_gen', 300),
+        termination=('n_gen', 1700),
         seed=42,
         verbose=False,
         save_history=False
@@ -125,16 +127,16 @@ def optimizar_pymoo_ga(cluster_idx, df_cluster, matriz_dist, depot_id, dia_seman
             # --- Violaciones de Ventana de Tiempo ---
             nodos_violados = {nid: d for nid, d in detalle_nodos.items() if not d.get("cumple_ventana", True)}
             if nodos_violados:
-                print(f"\n      ❌ VIOLACIONES DE VENTANA DE TIEMPO ({len(nodos_violados)} nodos):")
+                print(f"\n      ❌ VIOLACIONES DE VENTANA DE TIEMPO ({len(nodos_violados)} nodos - Tolera +{holgura_ventana} min):")
                 for nid, d in nodos_violados.items():
                     t_llegada = d.get("t_inicio_servicio", 0)
-                    b_v = d.get("b_ventana", 1440)
+                    b_v_relaxed = d.get("b_ventana_relaxed", d.get("b_ventana", 1440) + holgura_ventana)
                     viola = d.get("t_violacion_min", 0)
                     h_lleg = f"{int(t_llegada)//60:02d}:{int(t_llegada)%60:02d}"
-                    h_cierre = f"{int(b_v)//60:02d}:{int(b_v)%60:02d}"
-                    print(f"        - {nid}: Servicio a las {h_lleg} | Cierre ventana: {h_cierre} | Exceso: {viola:.0f} min")
+                    h_cierre_rel = f"{int(b_v_relaxed)//60:02d}:{int(b_v_relaxed)%60:02d}"
+                    print(f"        - {nid}: Servicio a las {h_lleg} | Cierre (+{holgura_ventana}m): {h_cierre_rel} | Exceso: {viola:.0f} min")
             else:
-                print(f"\n      ✅ Ventanas de tiempo: Sin violaciones.")
+                print(f"\n      ✅ Ventanas de tiempo: Sin violaciones (Tolerancia {holgura_ventana} min incluida).")
             
             # --- Resumen de esperas excesivas ---
             nodos_espera = {nid: d for nid, d in detalle_nodos.items() if d.get("t_espera_min", 0) > 30}
@@ -173,7 +175,7 @@ def min_a_hora(minutos: float) -> str:
     return f"{h:02d}:{m:02d}"
 
 
-def disparar_rutina_ga():
+def disparar_rutina_ga(holgura_ventana=20.0):
     print("=== INICIANDO TDVRPTW - GA OFICIAL PYMOO ===")
     t0 = time.time()
     
@@ -218,7 +220,7 @@ def disparar_rutina_ga():
     
     tasks = []
     for cluster_id, matriz_dist in matrices_km_o_m.items():
-        tasks.append((cluster_id, df_filtro, matriz_dist, depot_id, dia_semana_target))
+        tasks.append((cluster_id, df_filtro, matriz_dist, depot_id, dia_semana_target, holgura_ventana))
 
     max_w = os.cpu_count() or 1
     print(f"\n[PyMoo] Iniciando procesamiento paralelo de clústeres con {max_w} workers...")

@@ -11,6 +11,22 @@ def clean_rut(rut) -> str:
         return ""
     return str(rut).replace('.', '').replace('-', '').strip().upper()
 
+# Global placeholder for workers to avoid pickling overhead
+_global_G = None
+
+def _init_worker(G):
+    """Inicializa cada proceso con el grafo cargado una única vez."""
+    global _global_G
+    _global_G = G
+
+def _process_cluster_routing(c_id, df_cluster, df_depot):
+    """Función global requerida para pickling en multiprocessing."""
+    global _global_G
+    print(f"      [Proceso] Iniciando Ruteo para Cluster {c_id} ({len(df_cluster)} pedidos)...")
+    df_cluster_with_depot = pd.concat([df_cluster, df_depot], ignore_index=True)
+    matriz, info_rutas = calculate_routing_for_day(df_cluster_with_depot, _global_G)
+    return c_id, matriz, info_rutas
+
 def execute_vrp_pipeline(
     input_file: str = 'EDA/df_despacho.csv', 
     depot_address: str = "Santa Elena, Santiago., Bogotá - Sierra Bella, Santiago, RM (Metropolitana)",
@@ -70,8 +86,8 @@ def execute_vrp_pipeline(
     }])
     
     # 4. Clustering (Cluster-First)
-    print("\n[Paso 4] Agrupando pedidos (DBSCAN Cluster-First)...")
-    clusters_dict, outliers, pairs_for_astar = run_clustering_pipeline(df_geo, depot_id=depot_id, id_column='id_nodo', force_outlier_rescue=True)
+    print("\n[Paso 4] Agrupando pedidos (DBSCAN Cluster-First Geo-Temporal)...")
+    clusters_dict, outliers, pairs_for_astar = run_clustering_pipeline(df_geo, depot_id=depot_id, id_column='id_nodo', time_column='a_ventana', force_outlier_rescue=True)
     
     # 5. Carga del Grafo de Calles
     print("\n[Paso 5] Cargando Grafo de Red Vial...")
@@ -84,17 +100,28 @@ def execute_vrp_pipeline(
     matrices_por_cluster = {}
     rutas_por_cluster = {}
     
-    for c_id, df_cluster in clusters_dict.items():
-        print(f"\n--- Procesando Ruteo para Cluster {c_id} con {len(df_cluster)} pedidos + 1 Depósito ---")
+    import concurrent.futures
+    
+    max_workers = max(1, (os.cpu_count() or 2) // 2)
+    print(f"Ejecutando procesamiento paralelo con {max_workers} núcleos (Seguridad RAM activa)...")
+    
+    with concurrent.futures.ProcessPoolExecutor(
+        max_workers=max_workers,
+        initializer=_init_worker,
+        initargs=(G,)
+    ) as executor:
+        # Lanzar tareas sin pasar el Grafo G como argumento (ya está inicializando en el proceso worker)
+        futures = [
+            executor.submit(_process_cluster_routing, c_id, df_cluster, df_depot)
+            for c_id, df_cluster in clusters_dict.items()
+        ]
         
-        # Inyectar el depósito al cluster (crear los pares ida/vuelta requeridos por el VRP)
-        df_cluster_with_depot = pd.concat([df_cluster, df_depot], ignore_index=True)
-        
-        # Generar matriz NxN estricta de este cluster aislado
-        matriz, info_rutas = calculate_routing_for_day(df_cluster_with_depot, G)
-        
-        matrices_por_cluster[c_id] = matriz
-        rutas_por_cluster[c_id] = info_rutas
+        # Recolectar resultados
+        for future in concurrent.futures.as_completed(futures):
+            c_id, matriz, info_rutas = future.result()
+            matrices_por_cluster[c_id] = matriz
+            rutas_por_cluster[c_id] = info_rutas
+            print(f"      [Éxito] Cluster {c_id} procesado.")
         
     print("\n=== GENERANDO VISUALIZACIÓN === ")
     try:

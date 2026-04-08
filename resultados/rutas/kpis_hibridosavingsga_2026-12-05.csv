@@ -1,24 +1,26 @@
 ﻿KPI,Valor
-Función Objetivo Total,709092.55
-Costo de Ruta (F.O. componente transporte),706248.28
-Penalización por Espera Total (min),2844.3
-Distancia Total Recorrida (km),751.33
-Distancia Relativa (km/pedido),10.02
-Vehículos Utilizados,16.0
-Vehículos en Desuso,4.0
+Función Objetivo Total ($),40183470.54
+Costos de Ruta por Transporte ($),1034097.45
+Costos Fijos por Uso de Flota ($),2000000.0
+Valor de Penalización por Espera ($),37149373.09
+Tiempo de Espera Total (min),743.0
+Distancia Total Recorrida (km),1100.1
+Distancia Relativa (km/pedido),9.32
+Vehículos Utilizados,20.0
+Vehículos en Desuso,0.0
 Capacidad Flota Fija,20.0
-Tiempo Total en Ruta (horas),79.64
+Tiempo Total en Ruta (horas),48.4
 % Entregas a Tiempo,100.0
 Tardanza Promedio (min),0.0
-% Pedidos No Atendidos (Backlog),36.4
-Pedidos No Atendidos (qty),43.0
-% Utilización Promedio Capacidad Vehículos,63.0
-% Utilización Volumen,76.1
-% Utilización Peso,50.0
-Desviación Media de Carga (kg),136.6
-Tasa de Desocupación (%),147.1
-Espera Total Acumulada (min),2844.3
-Emisiones CO2 Totales (kg),309.78
-Emisiones CO2 por Pedido (kg),4.13
-Litros Diesel Estimados,115.59
-Tiempo de Cómputo (min),6.73
+% Pedidos No Atendidos (Backlog),0.0
+Pedidos No Atendidos (qty),0.0
+% Utilización Promedio Capacidad Vehículos,79.9
+% Utilización Volumen,96.5
+% Utilización Peso,63.4
+Desviación Media de Carga (kg),111.03
+Tasa de Desocupación (%),30.0
+Espera Total Acumulada (min),743.0
+Emisiones CO2 Totales (kg),453.58
+Emisiones CO2 por Pedido (kg),3.844
+Litros Diesel Estimados,169.25
+Tiempo de Cómputo (min),14.36
