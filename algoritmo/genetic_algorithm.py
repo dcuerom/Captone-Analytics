@@ -44,7 +44,8 @@ class SavingsSeededSampling(Sampling):
             X[0] = self.savings_seed
         return X
 
-def optimizar_pymoo_ga(cluster_idx, df_cluster, matriz_dist, depot_id, dia_semana=0, holgura_ventana=30.0):
+def optimizar_pymoo_ga(cluster_idx, df_cluster, matriz_dist, depot_id, dia_semana=0, holgura_ventana=30.0,
+                       pop_size=100, n_gen=2000, alpha_espera=50000.0, cap_vol_cm3=3750000.0, cap_peso_g=803333.33):
     """
     Ejecuta el Algoritmo Genético de PyMoo basado en Permutaciones
     sobre el problema ElementwiseProblem TDVRPTW.
@@ -58,11 +59,11 @@ def optimizar_pymoo_ga(cluster_idx, df_cluster, matriz_dist, depot_id, dia_seman
         matriz_dist_m=matriz_dist, 
         depot_id=depot_id,
         t_inicio=540.0,
-        cap_vol_cm3=3750000, 
-        cap_peso_g=803333.333333333,
+        cap_vol_cm3=cap_vol_cm3, 
+        cap_peso_g=cap_peso_g,
         factor_s=0.94,
         dia_semana=dia_semana,
-        alpha_espera=50000.0,  # Penalización por minuto de espera (balanceado vs costo_fijo_camion=100k)
+        alpha_espera=alpha_espera,  # Penalización por minuto de espera (balanceado vs costo_fijo_camion=100k)
         d_max_min=240.0,       # Duración máxima estricta del turno completo (4 horas)
         holgura_ventana=holgura_ventana
     )
@@ -78,14 +79,14 @@ def optimizar_pymoo_ga(cluster_idx, df_cluster, matriz_dist, depot_id, dia_seman
     print(f"      [{cluster_idx}] Calculando Ahorros (Clarke-Wright) para semilla inicial...")
     savings_route_ids = clarke_wright_savings(
         df_cluster, matriz_dist, depot_id, 
-        cap_vol_cm3=3750000, cap_peso_g=803333.333333333, d_max_min=240.0, speed_kmh=25.0
+        cap_vol_cm3=cap_vol_cm3, cap_peso_g=cap_peso_g, d_max_min=240.0, speed_kmh=25.0
     )
     id_to_idx = {cid: i for i, cid in enumerate(clientes)}
     savings_route_idx = np.array([id_to_idx[cid] for cid in savings_route_ids]) if savings_route_ids else None
 
     # 3. Configurar Algoritmo GA de Permutación con Semilla
     algorithm = GA(
-        pop_size=70,
+        pop_size=pop_size,
         sampling=SavingsSeededSampling(savings_seed=savings_route_idx, n_clientes=n_clientes),
         crossover=OrderCrossover(),
         mutation=InversionMutation(prob=0.3),
@@ -97,7 +98,7 @@ def optimizar_pymoo_ga(cluster_idx, df_cluster, matriz_dist, depot_id, dia_seman
     res = minimize(
         problem,
         algorithm,
-        termination=('n_gen', 1700),
+        termination=('n_gen', n_gen),
         seed=42,
         verbose=False,
         save_history=False
@@ -175,8 +176,9 @@ def min_a_hora(minutos: float) -> str:
     return f"{h:02d}:{m:02d}"
 
 
-def disparar_rutina_ga(holgura_ventana=20.0):
-    print("=== INICIANDO TDVRPTW - GA OFICIAL PYMOO ===")
+def disparar_rutina_ga(fecha_target='2026-12-04', holgura_ventana=30.0, max_camiones=20,
+                       pop_size=100, n_gen=2000, alpha_espera=50000.0, cap_vol_cm3=3750000.0, cap_peso_g=803333.33):
+    print(f"=== INICIANDO TDVRPTW - GA OFICIAL PYMOO [{fecha_target}] ===")
     t0 = time.time()
     
     data_path = os.path.join(base_dir, 'DatosSimulados', 'df_despacho.csv')
@@ -185,8 +187,7 @@ def disparar_rutina_ga(holgura_ventana=20.0):
     except Exception:
         print("CSV de datos no encontrado en DatosSimulados.")
         return
-        
-    fecha_target = '2026-12-05'
+
     # Extraer dinámicamente el día de la semana (0=Lunes, 6=Domingo)
     dia_semana_target = pd.to_datetime(fecha_target).weekday()
     
@@ -215,15 +216,16 @@ def disparar_rutina_ga(holgura_ventana=20.0):
     os.makedirs(mapa_dir, exist_ok=True)
     depot_id = "DEPOT_01_BASE"
     
-    MAX_CAMIONES_GLOBALES = 20  # <--- Parámetro solicitado para la flota estática total
+    MAX_CAMIONES_GLOBALES = max_camiones  # <--- Parámetro dinámico para la flota
     resultados_globales = {}
     
     tasks = []
     for cluster_id, matriz_dist in matrices_km_o_m.items():
-        tasks.append((cluster_id, df_filtro, matriz_dist, depot_id, dia_semana_target, holgura_ventana))
+        tasks.append((cluster_id, df_filtro, matriz_dist, depot_id, dia_semana_target, holgura_ventana,
+                      pop_size, n_gen, alpha_espera, cap_vol_cm3, cap_peso_g))
 
-    max_w = os.cpu_count() or 1
-    print(f"\n[PyMoo] Iniciando procesamiento paralelo de clústeres con {max_w} workers...")
+    max_w = max(1, (os.cpu_count() or 2) // 2)
+    print(f"\n[PyMoo] Iniciando procesamiento paralelo de clústeres con {max_w} workers (Seguridad CPU activa)...")
     
     with concurrent.futures.ProcessPoolExecutor(max_workers=max_w) as executor:
         future_to_cluster = {

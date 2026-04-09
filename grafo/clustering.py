@@ -179,7 +179,7 @@ def run_clustering_pipeline(
     X, df_clean = build_feature_matrix(df, time_column=time_column, default_window_start_hour=9)
     
     # 2. Normalización (alpha=1.0 por defecto, pero escalable)
-    X_scaled, _ = normalize_and_weight(X, alpha_time=10.0)
+    X_scaled, _ = normalize_and_weight(X, alpha_time=5.0)
     
     # 3. DBSCAN
     # Nota: Los hiperparámetros eps y min_samples requieren calibración 
