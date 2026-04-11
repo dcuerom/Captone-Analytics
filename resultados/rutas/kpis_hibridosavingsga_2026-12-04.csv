@@ -1,0 +1,26 @@
+﻿KPI,Valor
+Función Objetivo Total ($),133666695.92
+Costos de Ruta por Transporte ($),820801.35
+Costos Fijos por Uso de Flota ($),2000000.0
+Valor de Penalización por Espera ($),130845894.57
+Tiempo de Espera Total (min),2616.9
+Distancia Total Recorrida (km),873.19
+Distancia Relativa (km/pedido),10.4
+Vehículos Utilizados,20.0
+Vehículos en Desuso,0.0
+Capacidad Flota Fija,20.0
+Tiempo Total en Ruta (horas),69.0
+% Entregas a Tiempo,100.0
+Tardanza Promedio (min),0.0
+% Pedidos No Atendidos (Backlog),21.5
+Pedidos No Atendidos (qty),23.0
+% Utilización Promedio Capacidad Vehículos,61.8
+% Utilización Volumen,73.6
+% Utilización Peso,50.0
+Desviación Media de Carga (kg),160.09
+Tasa de Desocupación (%),107.9
+Espera Total Acumulada (min),2616.9
+Emisiones CO2 Totales (kg),360.02
+Emisiones CO2 por Pedido (kg),4.286
+Litros Diesel Estimados,134.34
+Tiempo de Cómputo (min),29.78
