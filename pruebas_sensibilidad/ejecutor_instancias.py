@@ -51,7 +51,7 @@ def ejecutar_pruebas():
     
     # 2. Definir Grid de Hiperparámetros (Según petición del usuario: capacidad, camiones, tiempo config)
     grid_params = {
-        "holgura_ventana": [30.0],
+        "holgura_ventana": [15.0],
         "pop_size": [100, 150],
         "n_gen": [2000, 3000],
         "max_camiones": [20, 30],        # Jugar con la cantidad de camiones max disponible

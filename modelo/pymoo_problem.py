@@ -256,14 +256,23 @@ class TDVRPTWProblem(ElementwiseProblem):
             t_espera = 0.0
             t_violacion = 0.0
             
-            if t_llegada_real < a_p:
-                t_espera = a_p - t_llegada_real
-                t_inicio_servicio = a_p
+            # NUEVO: Lógica de Ventanas Suaves (15 min suavizamiento en ambos extremos)
+            # Solo aplicable a clientes (a_p y b_p vienen de a_dict/b_dict que solo tienen clientes)
+            suavizamiento = 15.0
+            a_p_eff = a_p - suavizamiento
+            b_p_eff = b_p + suavizamiento
+            
+            t_espera = 0.0
+            t_violacion = 0.0
+            
+            if t_llegada_real < a_p_eff:
+                t_espera = a_p_eff - t_llegada_real
+                t_inicio_servicio = a_p_eff
             else:
                 t_inicio_servicio = t_llegada_real
                 
-            if t_inicio_servicio > (b_p + self.holgura_ventana):
-                t_violacion = t_inicio_servicio - (b_p + self.holgura_ventana)
+            if t_inicio_servicio > b_p_eff:
+                t_violacion = t_inicio_servicio - b_p_eff
                 restricciones_fail += t_violacion
             
             cam_t_viaje += t_viaje
@@ -279,7 +288,8 @@ class TDVRPTWProblem(ElementwiseProblem):
                 "t_llegada_real": t_llegada_real,
                 "a_ventana": a_p,
                 "b_ventana": b_p,
-                "b_ventana_relaxed": b_p + self.holgura_ventana,
+                "a_ventana_relaxed": a_p - suavizamiento,
+                "b_ventana_relaxed": b_p + suavizamiento,
                 "t_espera_min": t_espera,
                 "t_inicio_servicio": t_inicio_servicio,
                 "t_servicio_min": self.aten_fijo,

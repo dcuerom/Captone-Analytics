@@ -277,7 +277,7 @@ matrices, rutas, outliers = execute_vrp_pipeline(
 
 ### Ventanas de tiempo en clustering vs. routing
 
-El clustering usa **solo la hora de apertura** de la ventana como tercera dimensión. La restricción de cierre (`tiempo_max`) es responsabilidad del algoritmo A* durante la fase de ruteo. Esta separación es una simplificación deliberada: el clustering es heurístico y su objetivo es reducir el espacio de búsqueda, no garantizar factibilidad de ventanas.
+El clustering usa **solo la hora de apertura** de la ventana como tercera dimensión. La restricción de cierre y apertura suavizada (suavizamiento de 15 min en ambos extremos) es responsabilidad del modelo evaluador en el Algoritmo Genético. Esta separación es una simplificación deliberada: el clustering es heurístico y su objetivo es reducir el espacio de búsqueda, no garantizar factibilidad de ventanas.
 
 ### Grafo vial y Supabase
 

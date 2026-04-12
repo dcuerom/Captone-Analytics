@@ -52,8 +52,9 @@ $K_{22}: \text{Subconjunto de camiones designados para el turno 2 y para la ruta
 $X_{(i,t)jk} = \text{1 si }k \text{ utiliza el arco } ((i,t),j) \space | \space 0 \text{ En otro caso}$
 
 $ts_{ik} =  \text{Tiempo de arribo del camión }k \text{ al cliente }i$
+$suavizamiento = 15 \text{ min}$
 
-$W_{ik} = \max(0, \ a_i - ts_{ik}): \text{Tiempo de espera del camión } k \text{ en el cliente } i \text{ (antes de apertura de ventana)}$
+$W_{ik} = \max(0, \ (a_i - 15) - ts_{ik}): \text{Tiempo de espera del camión } k \text{ en el cliente } i \text{ (antes de apertura de ventana suave)}$
 
 ---
 
@@ -63,7 +64,7 @@ $$
 \min: \underbrace{\sum_{i=1}^{I} \sum_{j=1}^{I} \sum_{t=1}^{T} \sum_{k=1}^K X_{(i,t),j,k} \cdot C_{i,j}}_{\text{Costo de transporte}} + \underbrace{\alpha_w \cdot \sum_{i \in I} \sum_{k \in K} W_{ik}}_{\text{Penalización por espera}}
 $$
 
-Donde $W_{ik} = \max(0, \ a_i - ts_{ik})$ captura el tiempo improductivo que experimenta el camión $k$ al llegar antes de la apertura de ventana del cliente $i$. El parámetro $\alpha_w$ controla la importancia relativa de minimizar la espera frente al costo de transporte.
+Donde $W_{ik} = \max(0, \ (a_i - 15) - ts_{ik})$ captura el tiempo improductivo que experimenta el camión $k$ al llegar antes de la apertura de la ventana suave del cliente $i$. El parámetro $\alpha_w$ controla la importancia relativa de minimizar la espera frente al costo de transporte.
 
 ---
 
@@ -113,17 +114,17 @@ ts_{i,k} + s_i + aten + \sum_{t=1}^{T} (X_{(i,t),j,k} \cdot T_{ij,t}) - M(1-\sum
 $$
 
 $$
-\text{7. Ventanas de tiempo (con relajación de 30 min en cierre):}\\
+\text{7. Ventanas de tiempo suaves (con suavizamiento de 15 min en ambos extremos):}\\
 
 \sum_{k=1}^{K} ts_{i,k} 
 
 \geq
-a_i \ , \ \ \forall i \in I
+a_i - 15 \ , \ \ \forall i \in I
 \\ \ \\
 \sum_{k=1}^{K} ts_{i,k} 
 
 \leq
-b_i + 30 \ , \ \ \forall i \in I
+b_i + 15 \ , \ \ \forall i \in I
 $$
 
 
