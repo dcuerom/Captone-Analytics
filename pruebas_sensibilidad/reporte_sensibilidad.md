@@ -3,7 +3,7 @@
 Este documento resume los resultados obtenidos al evaluar distintas combinaciones de hiperparámetros sobre cada uno de los días de despacho registrados en `df_despacho.csv`.
 
 ## Resumen General
-- Total de corridas ejecutadas: 23
-- Pruebas Factibles (100% Entregas a Tiempo en ventanas de reloj): 21 (91.3%)
+- Total de corridas ejecutadas: 54
+- Pruebas Factibles (100% Entregas a Tiempo en ventanas de reloj): 21 (38.9%)
 
 ### Mejores Configuraciones (Top 10 - Menor Función Objetivo)

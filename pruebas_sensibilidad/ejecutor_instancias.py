@@ -46,15 +46,16 @@ def ejecutar_pruebas():
         print("El archivo no contiene 'fecha_entrega'.")
         sys.exit(1)
         
-    dias_disponibles = sorted(df_data['fecha_entrega'].dropna().unique())
+    dias_target = ['2026-12-04', '2026-12-05', '2026-12-06', '2026-12-07']
+    dias_disponibles = sorted([d for d in df_data['fecha_entrega'].dropna().unique() if d in dias_target])
     print(f"Días a evaluar ({len(dias_disponibles)}): {dias_disponibles}")
     
     # 2. Definir Grid de Hiperparámetros (Según petición del usuario: capacidad, camiones, tiempo config)
     grid_params = {
         "holgura_ventana": [15.0],
-        "pop_size": [100, 150],
-        "n_gen": [2000, 3000],
-        "max_camiones": [20, 30],        # Jugar con la cantidad de camiones max disponible
+        "pop_size": [200, 300],
+        "n_gen": [500, 1000],
+        "max_camiones": [30],        # Jugar con la cantidad de camiones max disponible
         "cap_multiplicador": [1.0, 1.25] # Jugar con la capacidad base (multiplicador)
     }
     
