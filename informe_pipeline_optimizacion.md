@@ -97,8 +97,8 @@ Las componentes del GA implementado son:
 - **Inicialización:** Clase `SavingsSeededSampling`, que inyecta la permutación de Clarke-Wright como primer individuo de la población. El resto se genera aleatoriamente.
 - **Operador de cruce:** `OrderCrossover` (OX), preserva el orden relativo de un subconjunto de genes del primer padre y rellena con el orden del segundo.
 - **Operador de mutación:** `InversionMutation` con probabilidad 0.3, invierte subsegmentos aleatorios de la permutación.
-- **Tamaño de población:** Configurable (por defecto 200 individuos).
-- **Criterio de terminación adaptativo:** `DefaultSingleObjectiveTermination` de PyMoo, que monitorea la mejora relativa de la función objetivo (`ftol = 1e-3`) en una ventana deslizante de 40 generaciones (`period = 40`), con un límite superior de `n_max_gen` generaciones. El algoritmo termina anticipadamente si el fitness se estabiliza, evitando generaciones redundantes en clústeres que convergen rápidamente.
+- **Tamaño de población:** Configurable (por defecto 200 individuos, ajustado a 50 a nivel experimental).
+- **Criterio de terminación adaptativo:** `DefaultSingleObjectiveTermination` de PyMoo, que monitorea la mejora relativa de la función objetivo (`ftol = 1e-3`) en una ventana deslizante de 100 generaciones (`period = 100`), con un límite superior de `n_max_gen` (por defecto 500 o 2000) generaciones. El algoritmo termina anticipadamente si el fitness se estabiliza, evitando generaciones redundantes en clústeres que convergen rápidamente.
 
 El problema se formula como `ElementwiseProblem` de PyMoo:
 - **Función objetivo F:** Minimización del costo total compuesto = distancia total acumulada × factor servicio + costo fijo por vehículo utilizado + penalización por tiempo de espera.
@@ -147,7 +147,8 @@ El repositorio está organizado en módulos funcionales desacoplados, cada uno c
 Captone-Analytics/
 ├── algoritmo/
 │   ├── genetic_algorithm.py
-│   └── savings.py
+│   ├── savings.py
+│   └── README.md
 ├── grafo/
 │   ├── main.py
 │   ├── clustering.py
@@ -159,8 +160,12 @@ Captone-Analytics/
 │   ├── pymoo_problem.py
 │   ├── modelo.py
 │   ├── vrp_pymoo.py
+│   ├── modelo.html
+│   ├── modelo.md
+│   ├── README.md
 │   └── funciones/
-│       └── tiempos_viaje.py
+│       ├── tiempos_viaje.py
+│       └── test_tiempos_viaje.py
 ├── gestion_flota/
 │   └── gestor.py
 ├── resultados/
@@ -250,9 +255,9 @@ F = (distancia_total × factor_s) + (num_camiones × costo_fijo) + (alpha_espera
 G = suma de minutos de violación de ventana de tiempo en todos los clientes
 ```
 
-**Lógica de ventanas suaves:** Se aplica una holgura de 15 minutos en ambos extremos de cada ventana de cliente, conforme a la política operativa del negocio.
+**Lógica de ventanas suaves:** Se aplica una holgura parametrizable (con un suavizamiento estricto de 15 minutos directos en el evaluador e input global de 20-30 min) en ambos extremos de cada ventana de cliente, conforme a la política operativa del negocio.
 
-**Plantillas de turno multi-viaje (K11, K12, K21, K22):** El modelo permite que un mismo vehículo físico realice un segundo turno de entregas dentro del mismo día, con un descanso mínimo de 120 minutos entre el retorno del primer turno y la salida del segundo.
+**Plantillas de turno multi-viaje (K11, K12, K21, K22):** El modelo permite que un mismo vehículo físico realice un segundo turno de entregas dentro del mismo día, con un descanso mínimo de 120 minutos entre el retorno del primer turno (calculando la ida, la atención, y el retorno explícito al depósito) y la salida del segundo.
 
 #### `modelo/funciones/tiempos_viaje.py` — Tiempos de Viaje Dependientes del Tiempo
 
@@ -272,7 +277,7 @@ Este módulo es el **punto de entrada principal** del pipeline de optimización 
 
 Funciones: `calcular_ahorros(df_cluster, matriz_dist, depot_id)`, `clarke_wright_savings(...)`
 
-Implementa la heurística constructiva de ahorros completa. Parte de la estructura de una ruta por cliente, calcula la matriz de ahorros para todos los pares (i, j) y fusiona rutas en orden decreciente de ahorro, validando en cada paso las restricciones de volumen, peso y duración estimada de turno.
+Implementa la heurística constructiva de ahorros completa. Parte de la estructura de una ruta por cliente, calcula la matriz de ahorros para todos los pares (i, j) y fusiona rutas en orden decreciente de ahorro, validando en cada paso las restricciones de volumen, peso, duración estimada de turno, **y estimación de ventanas de tiempo** (evitando uniones que excederían los cierres o generarían duraciones de ruta por encima del límite).
 
 El resultado es una lista ordenada de clientes (permutación) que representa la mejor solución constructiva encontrada por la heurística greedy.
 
@@ -393,9 +398,9 @@ El cromosoma del GA es una permutación de todos los clientes del clúster, sin 
 
 La tabla de velocidades `SPEED_TABLE_KMH` es homogénea para toda la red vial: aplica la misma velocidad a autopistas, avenidas principales y calles secundarias. En un modelo más preciso, la función `tau_ij` debería incorporar el tipo de vía (atributo `highway` del grafo OSMnx) para calcular velocidades diferenciadas. Esta simplificación introduce sesgo en las estimaciones de tiempo de viaje en sectores con mezcla de tipos de vía.
 
-### 5.4 Heurística de ahorros sin validación de ventanas de tiempo
+### 5.4 Dependencia del GA para la optimización final de ventanas (Resuelto parcialmente)
 
-La implementación de Clarke-Wright en `savings.py` valida restricciones de capacidad (volumen, peso) y duración total estimada del turno, pero **no evalúa la factibilidad de las ventanas de tiempo** al fusionar rutas. La complejidad de simular tiempos de llegada en la heurística constructiva justifica esta simplificación, pero implica que la semilla inicial puede ser infactible en clústeres con ventanas de tiempo muy restrictivas, lo que reduce su valor como warm-start para el GA.
+Aunque la implementación original de Clarke-Wright no validaba ventanas de tiempo, la versión actual en `savings.py` incorpora una validación heurística mediante `es_viable_ventanas`. Sin embargo, siendo una heurística constructiva estática, la precisión fina —especialmente con ventanas suaves y salidas JIT (Just-In-Time)— depende exclusivamente del Algoritmo Genético, lo que puede causar pequeñas variaciones de costo en el ajuste fino pos-construcción.
 
 ### 5.5 Geocodificación sin mecanismo de persistencia entre ejecuciones
 
@@ -411,7 +416,7 @@ El pipeline garantiza factibilidad dentro de cada clúster de forma independient
 
 El pipeline construido constituye una solución técnicamente completa y funcional para el TDVRPTW en el contexto de la distribución de última milla en Santiago. La estrategia de descomposición Cluster-First, Route-Second, combinada con el enfoque híbrido memético (Clarke-Wright + GA PyMoo), permite abordar instancias de escala real con tiempos de cómputo razonables y con garantías de cobertura total de clientes.
 
-Los mayores méritos del planteamiento residen en la rigurosidad del modelamiento matemático (función de tiempos de viaje de Fleischmann et al.), la correcta separación de responsabilidades entre módulos y la robustez operacional ante escenarios de infactibilidad. Las principales oportunidades de mejora están concentradas en la etapa de clusterización (calibración automática de hiperparámetros), la heurística constructiva (incorporación de validación de ventanas de tiempo) y el algoritmo de asignación de flota (reemplazo del enfoque greedy por una formulación de optimización).
+Los mayores méritos del planteamiento residen en la rigurosidad del modelamiento matemático (función de tiempos de viaje de Fleischmann et al.), la correcta separación de responsabilidades entre módulos y la robustez operacional ante escenarios de infactibilidad. Las principales oportunidades de mejora están concentradas en la etapa de clusterización (calibración automática de hiperparámetros) y el algoritmo de asignación de flota (reemplazo del enfoque greedy por una formulación de optimización).
 
 La estructura modular del código facilita la incorporación de estas mejoras de forma iterativa sin necesidad de refactorizaciones globales, lo que representa una ventaja metodológica significativa para el desarrollo continuo del sistema.
 
