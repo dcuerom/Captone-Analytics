@@ -28,6 +28,7 @@ from pymoo.operators.mutation.inversion import InversionMutation
 from pymoo.operators.sampling.rnd import PermutationRandomSampling
 from pymoo.optimize import minimize
 from pymoo.core.sampling import Sampling
+from pymoo.termination.default import DefaultSingleObjectiveTermination
 import concurrent.futures
 
 from algoritmo.savings import clarke_wright_savings
@@ -95,10 +96,16 @@ def optimizar_pymoo_ga(cluster_idx, df_cluster, matriz_dist, depot_id, dia_seman
     
     print(f"      [{cluster_idx}] Iniciando Minimize de PyMoo...")
     # 4. Minimización
+    terminacion_adaptativa = DefaultSingleObjectiveTermination(
+        ftol=1e-3,
+        period=40,
+        n_max_gen=n_gen
+    )
+    
     res = minimize(
         problem,
         algorithm,
-        termination=('n_gen', n_gen),
+        termination=terminacion_adaptativa,
         seed=42,
         verbose=False,
         save_history=False

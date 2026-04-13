@@ -120,8 +120,8 @@ def asignar_y_reportar(
             if bloque.t_retorno > t_fin_global:
                 t_fin_global = bloque.t_retorno
                 
-    # 2. Ordenamiento Temporal Puro (Earliest Departure First)
-    todos_bloques.sort(key=lambda b: (b.t_salida, b.t_retorno))
+    # 2. Ordenamiento FFD (First Fit Decreasing) por duración de la ruta (Mayor a Menor)
+    todos_bloques.sort(key=lambda b: (b.t_retorno - b.t_salida), reverse=True)
     
     # 3. Empaquetamiento en Flota Fija
     flota = [VehiculoGlobal(v_id) for v_id in range(1, max_vehiculos + 1)]
