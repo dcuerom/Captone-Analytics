@@ -165,7 +165,9 @@ class TDVRPTWProblem(ElementwiseProblem):
         cam_t_servicio = 0.0
         cam_dist = 0.0
 
-        for cliente_id in ruta_candidata:
+        i = 0
+        while i < len(ruta_candidata):
+            cliente_id = ruta_candidata[i]
             vol_p = self.vol_dict[cliente_id]
             peso_p = self.peso_dict[cliente_id]
             
@@ -187,7 +189,9 @@ class TDVRPTWProblem(ElementwiseProblem):
             duracion_turno_estimada = t_retorno_estimado - cam_t_salida
             
             # SPLIT CONDICIONAL (Activa regreso al depósito si se violan capacidades o la duración del turno supera el bloque d_max)
-            if (vol_actual + vol_p > self.cap_vol_cm3) or (peso_actual + peso_p > self.cap_peso_g) or (duracion_turno_estimada > self.d_max_min):
+            necesita_split = (vol_actual + vol_p > self.cap_vol_cm3) or (peso_actual + peso_p > self.cap_peso_g) or (duracion_turno_estimada > self.d_max_min)
+            
+            if necesita_split:
                 # Regreso del camión actual al depósito
                 dist_reg = float(self.matriz_dist.loc[nodo_previo, self.depot_id])
                 d_ret = np.array([dist_reg])
@@ -243,7 +247,7 @@ class TDVRPTWProblem(ElementwiseProblem):
                     plantilla_idx, turno_idx, cam_t_salida = get_best_start_shift(cliente_id)
                     ventanas_actual = self.ventanas_salida_turnos[plantilla_idx]
 
-                # Reseteo camión
+                # Reseteo camión - NO avanzamos i, el cliente actual se procesará en el nuevo turno
                 vol_actual = 0.0
                 peso_actual = 0.0
                 t_actual = cam_t_salida
@@ -253,6 +257,9 @@ class TDVRPTWProblem(ElementwiseProblem):
                 cam_t_espera = 0.0
                 cam_t_servicio = 0.0
                 cam_dist = 0.0
+                
+                # Continuamos el loop sin avanzar para procesar el mismo cliente en el nuevo turno
+                continue
         
             # Tránsito hacia cliente
             dist_arco = float(self.matriz_dist.loc[nodo_previo, cliente_id])
@@ -322,6 +329,8 @@ class TDVRPTWProblem(ElementwiseProblem):
             
             ruta_act.append(cliente_id)
             tiempos_llegada[cliente_id] = t_inicio_servicio
+            
+            i += 1  # Solo avanzamos al siguiente cliente si se procesó correctamente
             
         # Regreso del último camión
         t_retorno = t_actual  # t_actual ya incluye el tiempo de atención del último cliente
