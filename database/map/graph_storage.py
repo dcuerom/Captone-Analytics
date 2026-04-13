@@ -1,6 +1,11 @@
 import os
-from supabase import create_client, Client
+from typing import Any
 from dotenv import load_dotenv
+
+try:
+    from supabase import create_client  # type: ignore
+except Exception:
+    create_client = None
 
 load_dotenv()
 
@@ -8,15 +13,20 @@ load_dotenv()
 URL = os.getenv("SUPABASE_URL")
 KEY = os.getenv("SUPABASE_KEY")
 
-if not URL or not KEY:
-    raise ValueError("SUPABASE_URL y SUPABASE_KEY deben estar definidos en el archivo .env")
-
-supabase: Client = create_client(URL, KEY)
+supabase: Any = None
+if URL and KEY and create_client is not None:
+    try:
+        supabase = create_client(URL, KEY)
+    except Exception:
+        supabase = None
 
 import gzip
 
 def upload_graph_to_storage(local_filepath: str = 'grafo/santiago_routing_graph.graphml'):
     """Sube el archivo graphml de ruteo a Supabase Storage (comprimido en GZIP)."""
+    if supabase is None:
+        raise RuntimeError("Cliente Supabase no inicializado. Define SUPABASE_URL y SUPABASE_KEY en .env")
+
     if not os.path.exists(local_filepath):
         raise FileNotFoundError(f"No se encontró el archivo local: {local_filepath}")
         
@@ -79,3 +89,5 @@ def download_graph_from_storage(local_filepath: str = 'grafo/santiago_routing_gr
         
     print(f"Grafo guardado exitosamente en {local_filepath}.")
     return local_filepath
+    if supabase is None:
+        raise RuntimeError("Cliente Supabase no inicializado. Define SUPABASE_URL y SUPABASE_KEY en .env")

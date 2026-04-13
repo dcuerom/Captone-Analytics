@@ -14,7 +14,14 @@ def clean_rut(rut) -> str:
 def execute_vrp_pipeline(
     input_file: str = 'EDA/df_despacho.csv', 
     depot_address: str = "Santa Elena, Santiago., Bogotá - Sierra Bella, Santiago, RM (Metropolitana)",
-    sample_size: int = None
+    sample_size: int = None,
+    clustering_time_column: str = 'a_ventana',
+    clustering_default_window_start_hour: int = 9,
+    clustering_alpha_time: float = 10.0,
+    clustering_eps: float = 0.3,
+    clustering_min_samples: int = 3,
+    clustering_rescue_threshold: float = 0.8,
+    force_outlier_rescue: bool = True,
 ):
     """
     Gran instancia principal: Ejecuta toda la lógica de formación para el grafo dirigido
@@ -71,7 +78,18 @@ def execute_vrp_pipeline(
     
     # 4. Clustering (Cluster-First)
     print("\n[Paso 4] Agrupando pedidos (DBSCAN Cluster-First)...")
-    clusters_dict, outliers, pairs_for_astar = run_clustering_pipeline(df_geo, depot_id=depot_id, id_column='id_nodo', force_outlier_rescue=True)
+    clusters_dict, outliers, pairs_for_astar = run_clustering_pipeline(
+        df_geo,
+        depot_id=depot_id,
+        id_column='id_nodo',
+        force_outlier_rescue=force_outlier_rescue,
+        time_column=clustering_time_column,
+        default_window_start_hour=clustering_default_window_start_hour,
+        alpha_time=clustering_alpha_time,
+        eps=clustering_eps,
+        min_samples=clustering_min_samples,
+        rescue_threshold=clustering_rescue_threshold,
+    )
     
     # 5. Carga del Grafo de Calles
     print("\n[Paso 5] Cargando Grafo de Red Vial...")
