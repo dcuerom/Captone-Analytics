@@ -98,7 +98,7 @@ Las componentes del GA implementado son:
 - **Operador de cruce:** `OrderCrossover` (OX), preserva el orden relativo de un subconjunto de genes del primer padre y rellena con el orden del segundo.
 - **Operador de mutación:** `InversionMutation` con probabilidad 0.3, invierte subsegmentos aleatorios de la permutación.
 - **Tamaño de población:** Configurable (por defecto 200 individuos).
-- **Criterio de terminación:** Número fijo de generaciones (por defecto 500).
+- **Criterio de terminación adaptativo:** `DefaultSingleObjectiveTermination` de PyMoo, que monitorea la mejora relativa de la función objetivo (`ftol = 1e-3`) en una ventana deslizante de 40 generaciones (`period = 40`), con un límite superior de `n_max_gen` generaciones. El algoritmo termina anticipadamente si el fitness se estabiliza, evitando generaciones redundantes en clústeres que convergen rápidamente.
 
 El problema se formula como `ElementwiseProblem` de PyMoo:
 - **Función objetivo F:** Minimización del costo total compuesto = distancia total acumulada × factor servicio + costo fijo por vehículo utilizado + penalización por tiempo de espera.
@@ -283,7 +283,7 @@ Funciones: `optimizar_pymoo_ga(...)`, `disparar_rutina_ga(...)`
 
 **`SavingsSeededSampling`:** Operador de muestreo personalizado para PyMoo que inyecta la permutación de Clarke-Wright como primer individuo de la población, generando el resto aleatoriamente.
 
-**`optimizar_pymoo_ga`:** Para un clúster dado, instancia el `TDVRPTWProblem`, ejecuta Clarke-Wright para obtener la semilla, configura el GA con los operadores OX e InversionMutation, y llama a `pymoo.optimize.minimize`. En caso de infactibilidad, aplica el mecanismo de rescate descrito en la sección 2.4.
+**`optimizar_pymoo_ga`:** Para un clúster dado, instancia el `TDVRPTWProblem`, ejecuta Clarke-Wright para obtener la semilla, configura el GA con los operadores OX e InversionMutation, e invoca `pymoo.optimize.minimize` con un criterio de terminación adaptativo (`DefaultSingleObjectiveTermination`). En caso de infactibilidad, aplica el mecanismo de rescate descrito en la sección 2.4.
 
 **`disparar_rutina_ga`:** Función de alto nivel que actúa como punto de entrada. Filtra el dataset por fecha objetivo, llama al pipeline geográfico (`execute_vrp_pipeline`), distribuye los clústeres entre los workers paralelos mediante `ProcessPoolExecutor`, y finalmente llama al gestor de flota global (`asignar_y_reportar`).
 
@@ -304,8 +304,8 @@ Función principal: `asignar_y_reportar(...)`
 
 **`asignar_y_reportar`:** Orquesta todo el flujo de post-procesamiento:
 1. Recolección de bloques de ruta desde todos los clústeres.
-2. Ordenamiento por hora de salida (Earliest Departure First).
-3. Asignación greedy a vehículos de la flota fija.
+2. Ordenamiento **FFD (First Fit Decreasing)** por duración de bloque de mayor a menor, de modo que los bloques más largos se asignan primero y se dejan los huecos más pequeños para los bloques cortos, reduciendo el número de vehículos necesarios.
+3. Asignación greedy a vehículos de la flota fija siguiendo el orden FFD.
 4. Generación de cuatro archivos CSV de salida: resumen por camión, detalle de paradas, KPIs globales y clientes atendidos.
 5. Generación del mapa HTML interactivo global.
 
@@ -397,19 +397,11 @@ La tabla de velocidades `SPEED_TABLE_KMH` es homogénea para toda la red vial: a
 
 La implementación de Clarke-Wright en `savings.py` valida restricciones de capacidad (volumen, peso) y duración total estimada del turno, pero **no evalúa la factibilidad de las ventanas de tiempo** al fusionar rutas. La complejidad de simular tiempos de llegada en la heurística constructiva justifica esta simplificación, pero implica que la semilla inicial puede ser infactible en clústeres con ventanas de tiempo muy restrictivas, lo que reduce su valor como warm-start para el GA.
 
-### 5.5 Gestión greedy de flota sin optimización de la asignación
-
-El algoritmo de asignación de bloques de ruta a vehículos físicos en `gestor.py` es estrictamente greedy: asigna cada bloque al primer vehículo disponible (en orden de ID). Este enfoque no garantiza la asignación óptima en cuanto a minimización del número de vehículos usados o maximización de la utilización de capacidad. Heurísticas como First-Fit Decreasing o formulaciones de bin-packing podrían reducir el número de vehículos necesarios.
-
-### 5.6 Geocodificación sin mecanismo de persistencia entre ejecuciones
+### 5.5 Geocodificación sin mecanismo de persistencia entre ejecuciones
 
 El módulo `geocoder.py` implementa un caché de coordenadas en memoria durante la ejecución actual, pero no persiste los resultados entre ejecuciones. Cada vez que se ejecuta el pipeline para una fecha nueva con pedidos que comparten direcciones con ejecuciones anteriores, se vuelven a consultar las coordenadas vía API. Un caché persistente en disco (por ejemplo, en la base de datos de `database/`) reduciría el tiempo de inicialización y los costos de API.
 
-### 5.7 Criterio de terminación del GA fijo e independiente del tamaño del clúster
-
-El número de generaciones del GA (por defecto 500) es un parámetro fijo que se aplica uniformemente a todos los clústeres, independientemente de su tamaño. Un clúster de 3 clientes requiere menos generaciones para converger que uno de 30 clientes. La ausencia de un criterio de terminación adaptativo (como la convergencia por estancamiento del fitness) resulta en tiempo de cómputo desigual entre clústeres y puede generar tanto convergencia prematura como sobreoptimización en clústeres pequeños.
-
-### 5.8 Ausencia de validación de factibilidad inter-clúster
+### 5.7 Ausencia de validación de factibilidad inter-clúster
 
 El pipeline garantiza factibilidad dentro de cada clúster de forma independiente, pero no verifica que la asignación global de bloques de ruta a vehículos sea factible en cuanto al cumplimiento de la demanda total diaria. Si el número de vehículos disponibles es insuficiente para absorber todos los bloques, los bloques huérfanos se reportan pero no se reoptimiza la asignación para minimizarlos.
 
