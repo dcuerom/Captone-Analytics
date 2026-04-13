@@ -543,22 +543,43 @@ def _build_payload() -> Dict[str, Any]:
     if not dates:
         raise FileNotFoundError("No se encontraron archivos de corridas en resultados/rutas.")
 
-    latest = dates[-1]
-    current = _build_dataset(latest, include_routes=True)
-
     history = []
-    for d in reversed(dates):
-        ds = _build_dataset(d, include_routes=False)
-        run = ds["run"]
-        run["routes"] = []
-        history.append(run)
+    current: Optional[Dict[str, Any]] = None
+    skipped_dates: List[str] = []
 
-    return {
+    for d in reversed(dates):
+        try:
+            ds_hist = _build_dataset(d, include_routes=False)
+            run = ds_hist["run"]
+            run["routes"] = []
+            history.append(run)
+
+            if current is None:
+                try:
+                    current = _build_dataset(d, include_routes=True)
+                except Exception:
+                    # Si falla el detalle completo de esta fecha, mantenemos historial
+                    # y seguimos buscando una corrida completa más antigua.
+                    skipped_dates.append(d)
+        except Exception:
+            skipped_dates.append(d)
+            continue
+
+    if current is None:
+        detail = f" Fechas omitidas por artefactos incompletos: {', '.join(skipped_dates)}." if skipped_dates else ""
+        raise FileNotFoundError(
+            "No se encontró una corrida válida para construir el dashboard." + detail
+        )
+
+    payload = {
         "optimizationRun": current["run"],
         "orders": current["orders"],
         "fleet": current["fleet"],
         "historicalRuns": history,
     }
+    if skipped_dates:
+        payload["warnings"] = [f"Corridas históricas omitidas por artefactos incompletos: {', '.join(skipped_dates)}"]
+    return payload
 
 
 def _start_optimization_async(requested_date: Optional[str], config: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:

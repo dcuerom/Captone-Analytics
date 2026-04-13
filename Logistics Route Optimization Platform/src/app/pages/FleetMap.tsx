@@ -1,5 +1,6 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { MapContainer, TileLayer, Marker, Popup, Polyline, CircleMarker } from "react-leaflet";
+import { useMap } from "react-leaflet";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
 import { Button } from "../components/ui/button";
 import { StatusBadge } from "../components/shared/StatusBadge";
@@ -12,6 +13,24 @@ import "leaflet/dist/leaflet.css";
 // Colores por cluster
 const CLUSTER_COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899'];
 
+function AutoFitBounds({ points }: { points: [number, number][] }) {
+  const map = useMap();
+
+  useEffect(() => {
+    if (points.length >= 2) {
+      map.fitBounds(points, { padding: [32, 32], maxZoom: 13 });
+      return;
+    }
+    if (points.length === 1) {
+      map.setView(points[0], 13);
+      return;
+    }
+    map.setView([-33.4489, -70.6693], 11);
+  }, [map, points]);
+
+  return null;
+}
+
 export function FleetMap() {
   const [selectedRoute, setSelectedRoute] = useState<string>("all");
   const [mapReady, setMapReady] = useState(false);
@@ -19,6 +38,9 @@ export function FleetMap() {
   const { run, orders, loading, error } = useAppData();
   const centerLat = -33.4489;
   const centerLng = -70.6693;
+  const orderById = useMemo(() => {
+    return new Map(orders.map((order) => [order.id, order]));
+  }, [orders]);
 
   useEffect(() => {
     // Fix for Leaflet default marker icons
@@ -28,6 +50,19 @@ export function FleetMap() {
   const filteredRoutes = selectedRoute === "all" 
     ? run.routes 
     : run.routes.filter(r => r.vehicleId === selectedRoute);
+  const mapPoints = useMemo(() => {
+    const points: [number, number][] = [];
+    for (const route of filteredRoutes) {
+      const sortedStops = [...route.stops].sort((a, b) => a.sequence - b.sequence);
+      for (const stop of sortedStops) {
+        const order = orderById.get(stop.orderId);
+        if (!order) continue;
+        if (!Number.isFinite(order.lat) || !Number.isFinite(order.lng)) continue;
+        points.push([order.lat, order.lng]);
+      }
+    }
+    return points;
+  }, [filteredRoutes, orderById]);
 
   if (loading || !mapReady) {
     return (
@@ -89,6 +124,7 @@ export function FleetMap() {
             zoom={11}
             style={{ height: "100%", width: "100%" }}
           >
+            <AutoFitBounds points={mapPoints} />
             <TileLayer
               attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
               url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
@@ -96,8 +132,9 @@ export function FleetMap() {
 
             {/* Draw routes */}
             {filteredRoutes.map((route, routeIndex) => {
-              const routeOrders = route.stops.map(stop => 
-                orders.find(o => o.id === stop.orderId)
+              const sortedStops = [...route.stops].sort((a, b) => a.sequence - b.sequence);
+              const routeOrders = sortedStops.map(stop => 
+                orderById.get(stop.orderId)
               ).filter(o => o !== undefined);
 
               const routeColor = CLUSTER_COLORS[route.cluster % CLUSTER_COLORS.length];
@@ -116,8 +153,8 @@ export function FleetMap() {
                   )}
 
                   {/* Stop markers */}
-                  {route.stops.map((stop, stopIndex) => {
-                    const order = orders.find(o => o.id === stop.orderId);
+                  {sortedStops.map((stop, stopIndex) => {
+                    const order = orderById.get(stop.orderId);
                     if (!order) return null;
 
                     return (
@@ -209,7 +246,7 @@ export function FleetMap() {
                   <div className="w-4 h-4 rounded-full bg-red-600" />
                   <span className="text-slate-700">Violación de ventana</span>
                 </div>
-                {CLUSTER_COLORS.slice(0, Math.max(...run.routes.map(r => r.cluster))).map((color, i) => (
+                {CLUSTER_COLORS.slice(0, run.routes.length ? Math.max(...run.routes.map(r => r.cluster)) : 0).map((color, i) => (
                   <div key={i} className="flex items-center gap-2 text-sm">
                     <div className="w-4 h-1 rounded" style={{ backgroundColor: color }} />
                     <span className="text-slate-700">Ruta Cluster {i + 1}</span>
