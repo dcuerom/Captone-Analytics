@@ -48,7 +48,7 @@ export function FleetMap() {
           <div>
             <h1 className="text-2xl font-semibold text-slate-900 mb-1">Mapa Interactivo de Flota</h1>
             <p className="text-sm text-slate-600">{run.name} - {run.totalVehiclesUsed} vehículos activos</p>
-            {error && <p className="text-xs text-amber-600 mt-1">Backend no disponible, usando datos mock.</p>}
+            {error && <p className="text-xs text-amber-600 mt-1">Backend no disponible. Verifica python backend/api_server.py y npm run dev.</p>}
           </div>
           
           <div className="flex items-center gap-3">

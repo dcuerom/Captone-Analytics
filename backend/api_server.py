@@ -30,6 +30,12 @@ OPTIMIZATION_STATE: Dict[str, Any] = {
     "error": None,
     "result": None,
     "requestedDate": None,
+    "progressPct": 0.0,
+    "stage": "idle",
+    "stageMessage": "Sin optimización en curso.",
+    "currentStep": 0,
+    "totalSteps": 0,
+    "updatedAt": None,
 }
 OPTIMIZATION_LOCK = threading.Lock()
 
@@ -556,6 +562,23 @@ def _build_payload() -> Dict[str, Any]:
 
 
 def _start_optimization_async(requested_date: Optional[str], config: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    def _report_progress(
+        stage: str,
+        message: str,
+        progress_pct: float,
+        current_step: Optional[int] = None,
+        total_steps: Optional[int] = None,
+    ) -> None:
+        with OPTIMIZATION_LOCK:
+            OPTIMIZATION_STATE["stage"] = str(stage)
+            OPTIMIZATION_STATE["stageMessage"] = str(message)
+            OPTIMIZATION_STATE["progressPct"] = max(0.0, min(100.0, float(progress_pct)))
+            OPTIMIZATION_STATE["updatedAt"] = _utc_now_iso()
+            if current_step is not None:
+                OPTIMIZATION_STATE["currentStep"] = int(current_step)
+            if total_steps is not None:
+                OPTIMIZATION_STATE["totalSteps"] = int(total_steps)
+
     with OPTIMIZATION_LOCK:
         if OPTIMIZATION_STATE["status"] == "running":
             return {"started": False, "reason": "already_running", "state": OPTIMIZATION_STATE.copy()}
@@ -566,28 +589,43 @@ def _start_optimization_async(requested_date: Optional[str], config: Optional[Di
         OPTIMIZATION_STATE["error"] = None
         OPTIMIZATION_STATE["result"] = None
         OPTIMIZATION_STATE["requestedDate"] = requested_date
+        OPTIMIZATION_STATE["progressPct"] = 0.0
+        OPTIMIZATION_STATE["stage"] = "preparing"
+        OPTIMIZATION_STATE["stageMessage"] = "Preparando optimización..."
+        OPTIMIZATION_STATE["currentStep"] = 0
+        OPTIMIZATION_STATE["totalSteps"] = 0
+        OPTIMIZATION_STATE["updatedAt"] = _utc_now_iso()
 
     def _worker() -> None:
         try:
             from algoritmo.genetic_algorithm import disparar_rutina_ga
 
+            _report_progress("preparing", "Iniciando flujo de optimización...", 3.0)
             result = disparar_rutina_ga(
                 input_csv_path=str(EDA_PATH if EDA_PATH.exists() else SIM_PATH),
                 fecha_target=requested_date,
                 max_vehiculos_globales=None,
                 config=config,
+                progress_callback=_report_progress,
             )
             with OPTIMIZATION_LOCK:
                 OPTIMIZATION_STATE["status"] = "completed"
                 OPTIMIZATION_STATE["finishedAt"] = _utc_now_iso()
                 OPTIMIZATION_STATE["result"] = result
                 OPTIMIZATION_STATE["error"] = None
+                OPTIMIZATION_STATE["progressPct"] = 100.0
+                OPTIMIZATION_STATE["stage"] = "completed"
+                OPTIMIZATION_STATE["stageMessage"] = "Optimización finalizada correctamente."
+                OPTIMIZATION_STATE["updatedAt"] = _utc_now_iso()
         except Exception as exc:
             with OPTIMIZATION_LOCK:
                 OPTIMIZATION_STATE["status"] = "failed"
                 OPTIMIZATION_STATE["finishedAt"] = _utc_now_iso()
                 OPTIMIZATION_STATE["error"] = str(exc)
                 OPTIMIZATION_STATE["result"] = None
+                OPTIMIZATION_STATE["stage"] = "failed"
+                OPTIMIZATION_STATE["stageMessage"] = f"Optimización fallida: {exc}"
+                OPTIMIZATION_STATE["updatedAt"] = _utc_now_iso()
 
     t = threading.Thread(target=_worker, daemon=True)
     t.start()

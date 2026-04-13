@@ -14,6 +14,12 @@ export interface OptimizationStatusPayload {
   error: string | null;
   result: Record<string, unknown> | null;
   requestedDate: string | null;
+  progressPct?: number;
+  stage?: string;
+  stageMessage?: string;
+  currentStep?: number;
+  totalSteps?: number;
+  updatedAt?: string | null;
 }
 
 export interface OptimizationConfigPayload {
@@ -39,6 +45,18 @@ export interface OptimizationConfigPayload {
 
 const API_BASE_URL = (import.meta as any).env?.VITE_API_BASE_URL ?? '/api/v1';
 
+async function readJsonSafe(response: Response): Promise<any> {
+  const raw = await response.text();
+  if (!raw || !raw.trim()) {
+    return null;
+  }
+  try {
+    return JSON.parse(raw);
+  } catch {
+    throw new Error('Respuesta inválida del backend (JSON incompleto o corrupto).');
+  }
+}
+
 export async function fetchDashboardData(): Promise<DashboardDataPayload> {
   const response = await fetch(`${API_BASE_URL}/data`, {
     method: 'GET',
@@ -46,12 +64,14 @@ export async function fetchDashboardData(): Promise<DashboardDataPayload> {
       Accept: 'application/json',
     },
   });
+  const payload = (await readJsonSafe(response)) as DashboardDataPayload | null;
 
   if (!response.ok) {
-    throw new Error(`Error API ${response.status}: ${response.statusText}`);
+    throw new Error((payload as any)?.error ?? `Error API ${response.status}: ${response.statusText}`);
   }
-
-  const payload = (await response.json()) as DashboardDataPayload;
+  if (!payload) {
+    throw new Error('Backend no disponible o respuesta vacía en /api/v1/data.');
+  }
   return payload;
 }
 
@@ -72,9 +92,12 @@ export async function uploadOrdersCsv(filename: string, csvText: string) {
     }),
   });
 
-  const data = await response.json();
+  const data = await readJsonSafe(response);
   if (!response.ok) {
     throw new Error(data?.error ?? `Error API ${response.status}`);
+  }
+  if (!data) {
+    throw new Error('Backend no disponible o respuesta vacía en /api/v1/upload-orders.');
   }
   return data as { status: string; message: string; rows: number; columns: string[] };
 }
@@ -86,9 +109,12 @@ export async function getOptimizationDefaults(): Promise<OptimizationConfigPaylo
       Accept: 'application/json',
     },
   });
-  const data = await response.json();
+  const data = await readJsonSafe(response);
   if (!response.ok) {
     throw new Error(data?.error ?? `Error API ${response.status}`);
+  }
+  if (!data?.defaults) {
+    throw new Error('Backend no disponible o respuesta vacía en /api/v1/optimize-config.');
   }
   return data.defaults as OptimizationConfigPayload;
 }
@@ -106,9 +132,12 @@ export async function startOptimization(
     body: JSON.stringify({ date, config }),
   });
 
-  const data = await response.json();
+  const data = await readJsonSafe(response);
   if (!response.ok) {
     throw new Error(data?.error ?? `Error API ${response.status}`);
+  }
+  if (!data) {
+    throw new Error('Backend no disponible o respuesta vacía en /api/v1/optimize.');
   }
   return data as OptimizationStatusPayload;
 }
@@ -120,9 +149,12 @@ export async function getOptimizationStatus(): Promise<OptimizationStatusPayload
       Accept: 'application/json',
     },
   });
-  const data = await response.json();
+  const data = await readJsonSafe(response);
   if (!response.ok) {
     throw new Error(data?.error ?? `Error API ${response.status}`);
+  }
+  if (!data) {
+    throw new Error('Backend no disponible o respuesta vacía en /api/v1/optimize-status.');
   }
   return data as OptimizationStatusPayload;
 }

@@ -8,7 +8,7 @@ import os
 import sys
 import time
 import concurrent.futures
-from typing import Optional
+from typing import Callable, Optional
 
 import numpy as np
 import pandas as pd
@@ -77,6 +77,29 @@ def _load_input_dataframe(input_csv_path: Optional[str]) -> tuple[pd.DataFrame, 
 
 def _normalize_date_series(values: pd.Series) -> pd.Series:
     return pd.to_datetime(values, errors='coerce').dt.strftime('%Y-%m-%d')
+
+
+def _notify_progress(
+    progress_callback: Optional[Callable[..., None]],
+    stage: str,
+    message: str,
+    progress_pct: float,
+    current_step: Optional[int] = None,
+    total_steps: Optional[int] = None,
+) -> None:
+    if not callable(progress_callback):
+        return
+    try:
+        progress_callback(
+            stage=stage,
+            message=message,
+            progress_pct=progress_pct,
+            current_step=current_step,
+            total_steps=total_steps,
+        )
+    except Exception:
+        # El progreso no debe detener el pipeline de optimización.
+        pass
 
 
 def optimizar_pymoo_ga(
@@ -178,10 +201,12 @@ def disparar_rutina_ga(
     fecha_target: Optional[str] = None,
     max_vehiculos_globales: Optional[int] = 20,
     config: Optional[dict] = None,
+    progress_callback: Optional[Callable[..., None]] = None,
 ):
     print("=== INICIANDO TDVRPTW - HIBRIDO SAVINGS + GA ===")
     t0 = time.time()
     cfg = _merge_config(config)
+    _notify_progress(progress_callback, "preparing", "Validando datos de entrada...", 5.0)
 
     df, data_path = _load_input_dataframe(input_csv_path)
     if df.empty:
@@ -211,6 +236,7 @@ def disparar_rutina_ga(
         df_filtro = df.copy()
 
     print(f"Pedidos capturados para {fecha_target} (Día {dia_semana_target}): {len(df_filtro)}")
+    _notify_progress(progress_callback, "preparing", f"Pedidos listos para {fecha_target}.", 15.0)
 
     if 'id_cliente' in df_filtro.columns and 'id_pedido' in df_filtro.columns:
         df_filtro['rut_clean'] = df_filtro['id_cliente'].apply(clean_rut)
@@ -222,6 +248,7 @@ def disparar_rutina_ga(
     os.makedirs(os.path.dirname(temp_csv_path), exist_ok=True)
     df_filtro.to_csv(temp_csv_path, index=False)
 
+    _notify_progress(progress_callback, "clustering_routing", "Ejecutando clustering y matriz vial...", 25.0)
     matrices_km_o_m, rutas_dict, G, depot_coords = execute_vrp_pipeline(
         input_file=temp_csv_path,
         clustering_time_column=str(cfg["clustering_time_column"]),
@@ -232,6 +259,7 @@ def disparar_rutina_ga(
         clustering_rescue_threshold=float(cfg["clustering_rescue_threshold"]),
         force_outlier_rescue=bool(cfg["force_outlier_rescue"]),
     )
+    _notify_progress(progress_callback, "clustering_routing", "Clustering y ruteo vial completados.", 55.0)
 
     out_dir = os.path.join(base_dir, 'resultados', 'rutas')
     mapa_dir = os.path.join(base_dir, 'resultados', 'mapa_rutas')
@@ -245,16 +273,26 @@ def disparar_rutina_ga(
         (cluster_id, df_filtro, matriz_dist, depot_id, dia_semana_target, cfg)
         for cluster_id, matriz_dist in matrices_km_o_m.items()
     ]
+    total_clusters = len(tasks)
 
     resultados_globales = {}
     max_w = max(1, (os.cpu_count() or 2) // 2)
     print(f"[PyMoo] Procesamiento paralelo de clústeres con {max_w} workers...")
+    _notify_progress(
+        progress_callback,
+        "optimizing_clusters",
+        "Optimizando clústeres con GA...",
+        60.0,
+        current_step=0,
+        total_steps=total_clusters,
+    )
 
     with concurrent.futures.ProcessPoolExecutor(max_workers=max_w) as executor:
         future_to_cluster = {
             executor.submit(optimizar_pymoo_ga, *task): task[0]
             for task in tasks
         }
+        completed_clusters = 0
         for future in concurrent.futures.as_completed(future_to_cluster):
             cluster_id = future_to_cluster[future]
             try:
@@ -262,6 +300,18 @@ def disparar_rutina_ga(
                 print(f"[PyMoo] Cluster {cluster_id} finalizado.")
             except Exception as e:
                 print(f"Error procesando {cluster_id}: {e}")
+            completed_clusters += 1
+            progress_pct = 60.0 + (30.0 * completed_clusters / max(1, total_clusters))
+            _notify_progress(
+                progress_callback,
+                "optimizing_clusters",
+                f"Clústeres optimizados: {completed_clusters}/{total_clusters}",
+                progress_pct,
+                current_step=completed_clusters,
+                total_steps=total_clusters,
+            )
+
+    _notify_progress(progress_callback, "assigning_fleet", "Asignando rutas a la flota global...", 92.0)
 
     tiempo_total_min = (time.time() - t0) / 60.0
 
@@ -279,6 +329,8 @@ def disparar_rutina_ga(
         depot_coords=depot_coords,
         tiempo_computo_min=tiempo_total_min,
     )
+    _notify_progress(progress_callback, "exporting", "Exportando reportes y mapa...", 97.0)
+    _notify_progress(progress_callback, "completed", "Optimización completada.", 100.0)
 
     print("[Éxito] Optimización y Asignación de Flota finalizada.")
     return {

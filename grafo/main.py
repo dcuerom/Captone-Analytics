@@ -1,5 +1,6 @@
 import pandas as pd
 import os
+from typing import Optional
 from .geocoder import geocode_orders, geocode_depot
 from .network_builder import get_santiago_graph
 from .clustering import run_clustering_pipeline
@@ -38,6 +39,7 @@ def execute_vrp_pipeline(
     clustering_min_samples: int = 3,
     clustering_rescue_threshold: float = 0.8,
     force_outlier_rescue: bool = True,
+    routing_max_workers: Optional[int] = None,
 ):
     """
     Gran instancia principal: Ejecuta toda la lógica de formación para el grafo dirigido
@@ -119,27 +121,45 @@ def execute_vrp_pipeline(
     rutas_por_cluster = {}
     
     import concurrent.futures
-    
-    max_workers = max(1, (os.cpu_count() or 2) // 2)
-    print(f"Ejecutando procesamiento paralelo con {max_workers} núcleos (Seguridad RAM activa)...")
-    
-    with concurrent.futures.ProcessPoolExecutor(
-        max_workers=max_workers,
-        initializer=_init_worker,
-        initargs=(G,)
-    ) as executor:
-        # Lanzar tareas sin pasar el Grafo G como argumento (ya está inicializando en el proceso worker)
-        futures = [
-            executor.submit(_process_cluster_routing, c_id, df_cluster, df_depot)
-            for c_id, df_cluster in clusters_dict.items()
-        ]
-        
-        # Recolectar resultados
-        for future in concurrent.futures.as_completed(futures):
-            c_id, matriz, info_rutas = future.result()
+
+    if routing_max_workers is None:
+        try:
+            routing_max_workers = int(os.getenv("ROUTING_MAX_WORKERS", "1"))
+        except Exception:
+            routing_max_workers = 1
+    routing_max_workers = max(1, int(routing_max_workers))
+
+    if routing_max_workers == 1:
+        print("Ejecutando ruteo en modo estable (1 worker, menor consumo de RAM)...")
+        for c_id, df_cluster in clusters_dict.items():
+            print(f"      [Proceso] Iniciando Ruteo para Cluster {c_id} ({len(df_cluster)} pedidos)...")
+            df_cluster_with_depot = pd.concat([df_cluster, df_depot], ignore_index=True)
+            matriz, info_rutas = calculate_routing_for_day(df_cluster_with_depot, G)
             matrices_por_cluster[c_id] = matriz
             rutas_por_cluster[c_id] = info_rutas
             print(f"      [Éxito] Cluster {c_id} procesado.")
+    else:
+        max_auto = max(1, (os.cpu_count() or 2) // 2)
+        max_workers = max(1, min(routing_max_workers, max_auto))
+        print(f"Ejecutando procesamiento paralelo con {max_workers} núcleos (Seguridad RAM activa)...")
+
+        with concurrent.futures.ProcessPoolExecutor(
+            max_workers=max_workers,
+            initializer=_init_worker,
+            initargs=(G,)
+        ) as executor:
+            # Lanzar tareas sin pasar el Grafo G como argumento (ya está inicializando en el proceso worker)
+            futures = [
+                executor.submit(_process_cluster_routing, c_id, df_cluster, df_depot)
+                for c_id, df_cluster in clusters_dict.items()
+            ]
+
+            # Recolectar resultados
+            for future in concurrent.futures.as_completed(futures):
+                c_id, matriz, info_rutas = future.result()
+                matrices_por_cluster[c_id] = matriz
+                rutas_por_cluster[c_id] = info_rutas
+                print(f"      [Éxito] Cluster {c_id} procesado.")
         
     print("\n=== GENERANDO VISUALIZACIÓN === ")
     try:

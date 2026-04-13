@@ -1,5 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
-import { fetchDashboardData, mockDashboardData } from './api';
+import { fetchDashboardData } from './api';
 import type { OptimizationRun, Order, Vehicle } from './mockData';
 
 interface AppDataContextValue {
@@ -12,23 +12,42 @@ interface AppDataContextValue {
   refresh: () => Promise<void>;
 }
 
-const fallback = mockDashboardData();
+const emptyRun: OptimizationRun = {
+  id: '',
+  name: 'Sin datos de optimización',
+  date: '',
+  status: 'failed',
+  totalOrders: 0,
+  assignedOrders: 0,
+  unassignedOrders: 0,
+  splitOrders: 0,
+  totalVehiclesUsed: 0,
+  totalVehiclesAvailable: 0,
+  totalDistanceKm: 0,
+  totalCost: 0,
+  totalWaitTimeMinutes: 0,
+  onTimePercentage: 0,
+  averageUtilization: 0,
+  executionTimeSeconds: 0,
+  warnings: [],
+  routes: [],
+};
 
 const AppDataContext = createContext<AppDataContextValue>({
-  run: fallback.optimizationRun,
-  orders: fallback.orders,
-  fleet: fallback.fleet,
-  historicalRuns: fallback.historicalRuns,
+  run: emptyRun,
+  orders: [],
+  fleet: [],
+  historicalRuns: [],
   loading: true,
   error: null,
   refresh: async () => undefined,
 });
 
 export function AppDataProvider({ children }: { children: ReactNode }) {
-  const [run, setRun] = useState<OptimizationRun>(fallback.optimizationRun);
-  const [orders, setOrders] = useState<Order[]>(fallback.orders);
-  const [fleet, setFleet] = useState<Vehicle[]>(fallback.fleet);
-  const [historicalRuns, setHistoricalRuns] = useState<OptimizationRun[]>(fallback.historicalRuns);
+  const [run, setRun] = useState<OptimizationRun>(emptyRun);
+  const [orders, setOrders] = useState<Order[]>([]);
+  const [fleet, setFleet] = useState<Vehicle[]>([]);
+  const [historicalRuns, setHistoricalRuns] = useState<OptimizationRun[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -38,18 +57,16 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
     }
     try {
       const data = await fetchDashboardData();
-      setRun(data.optimizationRun ?? fallback.optimizationRun);
-      setOrders(data.orders ?? fallback.orders);
-      setFleet(data.fleet ?? fallback.fleet);
-      setHistoricalRuns(data.historicalRuns?.length ? data.historicalRuns : fallback.historicalRuns);
+      setRun(data.optimizationRun ?? emptyRun);
+      setOrders(data.orders ?? []);
+      setFleet(data.fleet ?? []);
+      setHistoricalRuns(data.historicalRuns ?? []);
       setError(null);
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Error desconocido al cargar datos del backend';
       setError(message);
-      setRun(fallback.optimizationRun);
-      setOrders(fallback.orders);
-      setFleet(fallback.fleet);
-      setHistoricalRuns(fallback.historicalRuns);
+      // Conservamos el último estado válido en memoria.
+      // Si no existe estado previo, quedan valores vacíos por defecto.
     } finally {
       if (!background) {
         setLoading(false);

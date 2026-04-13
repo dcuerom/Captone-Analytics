@@ -54,7 +54,7 @@ export function Dashboard() {
       <div>
         <h1 className="text-3xl font-semibold text-slate-900 mb-2">Dashboard Ejecutivo</h1>
         <p className="text-slate-600">Resumen operativo y KPIs principales de optimización de rutas</p>
-        {error && <p className="text-xs text-amber-600 mt-1">Backend no disponible, usando datos mock.</p>}
+        {error && <p className="text-xs text-amber-600 mt-1">Backend no disponible. Verifica python backend/api_server.py y npm run dev.</p>}
       </div>
 
       {/* Run Status Alert */}

@@ -1,30 +1,142 @@
-import { useEffect, useState } from "react";
-import { Calendar, Upload, Play, Settings, Truck, Package } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { Upload, Play, Truck, Package } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
 import { Label } from "../components/ui/label";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../components/ui/tabs";
+import { Progress } from "../components/ui/progress";
 import { useAppData } from "../data/AppDataContext";
-import { Switch } from "../components/ui/switch";
-import { getOptimizationDefaults, getOptimizationStatus, startOptimization, uploadOrdersCsv } from "../data/api";
+import { getOptimizationDefaults, getOptimizationStatus, startOptimization, uploadOrdersCsv, type OptimizationStatusPayload } from "../data/api";
+
+const PLANNING_STORAGE_KEY = "planning_state_v1";
+const POLL_EVERY_MS = 3000;
+const POLL_TIMEOUT_MS = 15 * 60 * 1000;
+
+type PersistedPlanningState = {
+  deliveryDate?: string;
+  clusteringEps?: number;
+  clusteringMinSamples?: number;
+  gaGenerations?: number;
+  gaPopulation?: number;
+  maxRouteHours?: number;
+  maxVehicles?: number;
+};
+
+function loadPersistedPlanningState(): PersistedPlanningState {
+  if (typeof window === "undefined") return {};
+  try {
+    const raw = window.localStorage.getItem(PLANNING_STORAGE_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw) as PersistedPlanningState;
+    return parsed ?? {};
+  } catch {
+    return {};
+  }
+}
 
 export function Planning() {
+  const persisted = loadPersistedPlanningState();
   const [isOptimizing, setIsOptimizing] = useState(false);
   const [optimizationMessage, setOptimizationMessage] = useState<string | null>(null);
   const [optimizationError, setOptimizationError] = useState<string | null>(null);
-  const [deliveryDate, setDeliveryDate] = useState('2026-04-08');
-  const [clusteringEps, setClusteringEps] = useState(0.3);
-  const [clusteringMinSamples, setClusteringMinSamples] = useState(3);
-  const [gaGenerations, setGaGenerations] = useState(200);
-  const [gaPopulation, setGaPopulation] = useState(100);
-  const [maxRouteHours, setMaxRouteHours] = useState(5);
+  const [deliveryDate, setDeliveryDate] = useState(persisted.deliveryDate ?? '2026-04-08');
+  const [clusteringEps, setClusteringEps] = useState(persisted.clusteringEps ?? 0.3);
+  const [clusteringMinSamples, setClusteringMinSamples] = useState(persisted.clusteringMinSamples ?? 3);
+  const [gaGenerations, setGaGenerations] = useState(persisted.gaGenerations ?? 200);
+  const [gaPopulation, setGaPopulation] = useState(persisted.gaPopulation ?? 100);
+  const [maxRouteHours, setMaxRouteHours] = useState(persisted.maxRouteHours ?? 5);
+  const [maxVehicles, setMaxVehicles] = useState(persisted.maxVehicles ?? 20);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [isUploading, setIsUploading] = useState(false);
   const [uploadMessage, setUploadMessage] = useState<string | null>(null);
   const [uploadError, setUploadError] = useState<string | null>(null);
+  const [optimizationProgressPct, setOptimizationProgressPct] = useState(0);
+  const [optimizationStageMessage, setOptimizationStageMessage] = useState<string | null>(null);
+  const [optimizationStepCurrent, setOptimizationStepCurrent] = useState<number | null>(null);
+  const [optimizationStepTotal, setOptimizationStepTotal] = useState<number | null>(null);
   const { fleet, orders, loading, error, refresh } = useAppData();
+  const pollActiveRef = useRef(false);
+  const pollStartTsRef = useRef(0);
+
+  const applyOptimizationStatus = (status: OptimizationStatusPayload) => {
+    if (typeof status.progressPct === "number") {
+      setOptimizationProgressPct(Math.max(0, Math.min(100, Number(status.progressPct))));
+    }
+    if (status.stageMessage) {
+      setOptimizationStageMessage(status.stageMessage);
+    }
+    if (typeof status.currentStep === "number") {
+      setOptimizationStepCurrent(status.currentStep);
+    }
+    if (typeof status.totalSteps === "number") {
+      setOptimizationStepTotal(status.totalSteps);
+    }
+  };
+
+  const stopPolling = () => {
+    pollActiveRef.current = false;
+  };
+
+  const pollOptimizationUntilTerminal = async () => {
+    if (pollActiveRef.current) return;
+    pollActiveRef.current = true;
+    if (pollStartTsRef.current <= 0) {
+      pollStartTsRef.current = Date.now();
+    }
+
+    while (pollActiveRef.current) {
+      try {
+        const status = await getOptimizationStatus();
+        applyOptimizationStatus(status);
+
+        if (status.status === "running") {
+          setIsOptimizing(true);
+          setOptimizationMessage(status.stageMessage ?? "Optimizando rutas con modelo TDVRPTW...");
+
+          if (Date.now() - pollStartTsRef.current >= POLL_TIMEOUT_MS) {
+            stopPolling();
+            setIsOptimizing(false);
+            setOptimizationMessage(null);
+            setOptimizationError("Timeout esperando la optimización. Revisa logs del backend.");
+            return;
+          }
+          await new Promise((resolve) => setTimeout(resolve, POLL_EVERY_MS));
+          continue;
+        }
+
+        if (status.status === "completed") {
+          stopPolling();
+          setIsOptimizing(false);
+          setOptimizationProgressPct(100);
+          setOptimizationStageMessage(status.stageMessage ?? "Optimización finalizada.");
+          setOptimizationMessage("Optimización completada. Actualizando resultados...");
+          await refresh();
+          setOptimizationMessage("Resultados actualizados desde backend.");
+          return;
+        }
+
+        if (status.status === "failed") {
+          stopPolling();
+          setIsOptimizing(false);
+          throw new Error(status.error ?? "La optimización falló en backend.");
+        }
+
+        stopPolling();
+        setIsOptimizing(false);
+        setOptimizationMessage(null);
+        return;
+      } catch (err) {
+        stopPolling();
+        setIsOptimizing(false);
+        const message = err instanceof Error ? err.message : "No se pudo consultar estado de optimización.";
+        setOptimizationMessage(null);
+        setOptimizationStageMessage(null);
+        setOptimizationError(message);
+        return;
+      }
+    }
+  };
 
   useEffect(() => {
     const loadDefaults = async () => {
@@ -35,11 +147,62 @@ export function Planning() {
         setGaGenerations(Number(defaults.ga_n_gen ?? 200));
         setGaPopulation(Number(defaults.ga_pop_size ?? 100));
         setMaxRouteHours(Number((defaults.d_max_min ?? 300) / 60));
+        setMaxVehicles(Number(defaults.max_vehiculos_globales ?? 20));
       } catch {
         // Si el backend no está disponible, dejamos defaults locales.
       }
     };
     void loadDefaults();
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const payload: PersistedPlanningState = {
+      deliveryDate,
+      clusteringEps,
+      clusteringMinSamples,
+      gaGenerations,
+      gaPopulation,
+      maxRouteHours,
+      maxVehicles,
+    };
+    window.localStorage.setItem(PLANNING_STORAGE_KEY, JSON.stringify(payload));
+  }, [deliveryDate, clusteringEps, clusteringMinSamples, gaGenerations, gaPopulation, maxRouteHours, maxVehicles]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const syncWithBackendStatus = async () => {
+      try {
+        const status = await getOptimizationStatus();
+        if (cancelled) return;
+        applyOptimizationStatus(status);
+
+        if (status.status === "running") {
+          setIsOptimizing(true);
+          setOptimizationError(null);
+          setOptimizationMessage(status.stageMessage ?? "Optimizando rutas con modelo TDVRPTW...");
+          pollStartTsRef.current = Date.now();
+          void pollOptimizationUntilTerminal();
+          return;
+        }
+
+        if (status.status === "completed") {
+          setIsOptimizing(false);
+          setOptimizationProgressPct(100);
+          setOptimizationStageMessage(status.stageMessage ?? "Optimización finalizada.");
+          setOptimizationMessage("Última optimización completada.");
+          return;
+        }
+      } catch {
+        // Si no podemos leer estado, dejamos la UI en modo local.
+      }
+    };
+    void syncWithBackendStatus();
+
+    return () => {
+      cancelled = true;
+      stopPolling();
+    };
   }, []);
   
   const handleOptimize = async () => {
@@ -47,45 +210,40 @@ export function Planning() {
       setIsOptimizing(true);
       setOptimizationError(null);
       setOptimizationMessage("Iniciando optimización en backend...");
-      await startOptimization(deliveryDate, {
+      setOptimizationProgressPct(0);
+      setOptimizationStageMessage("Preparando optimización...");
+      setOptimizationStepCurrent(null);
+      setOptimizationStepTotal(null);
+      pollStartTsRef.current = Date.now();
+
+      const startResponse = await startOptimization(deliveryDate, {
         clustering_eps: Number(clusteringEps),
         clustering_min_samples: Number(clusteringMinSamples),
         ga_n_gen: Number(gaGenerations),
         ga_pop_size: Number(gaPopulation),
         d_max_min: Number(maxRouteHours) * 60,
-        max_vehiculos_globales: Number(fleet.length || 20),
+        max_vehiculos_globales: Number(maxVehicles),
       });
-
-      const timeoutMs = 15 * 60 * 1000;
-      const pollEveryMs = 3000;
-      const startTs = Date.now();
-
-      while (Date.now() - startTs < timeoutMs) {
-        const status = await getOptimizationStatus();
-        if (status.status === "running") {
-          setOptimizationMessage("Optimizando rutas con modelo TDVRPTW...");
-          await new Promise((resolve) => setTimeout(resolve, pollEveryMs));
-          continue;
-        }
-        if (status.status === "completed") {
-          setOptimizationMessage("Optimización completada. Actualizando resultados...");
-          await refresh();
-          setOptimizationMessage("Resultados actualizados desde backend.");
-          setIsOptimizing(false);
-          return;
-        }
-        if (status.status === "failed") {
-          throw new Error(status.error ?? "La optimización falló en backend.");
-        }
-        await new Promise((resolve) => setTimeout(resolve, pollEveryMs));
+      if (typeof startResponse.progressPct === "number") {
+        setOptimizationProgressPct(Math.max(0, Math.min(100, Number(startResponse.progressPct))));
       }
-
-      throw new Error("Timeout esperando la optimización. Revisa logs del backend.");
+      if (startResponse.stageMessage) {
+        setOptimizationStageMessage(startResponse.stageMessage);
+      }
+      if (typeof startResponse.currentStep === "number") {
+        setOptimizationStepCurrent(startResponse.currentStep);
+      }
+      if (typeof startResponse.totalSteps === "number") {
+        setOptimizationStepTotal(startResponse.totalSteps);
+      }
+      void pollOptimizationUntilTerminal();
     } catch (err) {
       const message = err instanceof Error ? err.message : "No se pudo ejecutar la optimización.";
       setOptimizationError(message);
       setOptimizationMessage(null);
+      setOptimizationStageMessage(null);
       setIsOptimizing(false);
+      stopPolling();
     }
   };
 
@@ -122,8 +280,26 @@ export function Planning() {
       <div>
         <h1 className="text-3xl font-semibold text-slate-900 mb-2">Planificación de Corrida</h1>
         <p className="text-slate-600">Configure y ejecute una nueva optimización de rutas TDVRPTW</p>
-        {error && <p className="text-xs text-amber-600 mt-1">Backend no disponible, usando datos mock.</p>}
+        {error && (
+          <p className="text-xs text-amber-700 mt-1">
+            Backend no disponible. Verifica <code>python backend/api_server.py</code> y <code>npm run dev</code>.
+          </p>
+        )}
         {optimizationMessage && <p className="text-xs text-blue-700 mt-1">{optimizationMessage}</p>}
+        {isOptimizing && (
+          <div className="mt-3 space-y-2 max-w-xl">
+            <div className="flex items-center justify-between text-xs text-slate-600">
+              <span>{optimizationStageMessage ?? "Optimizando..."}</span>
+              <span>{Math.round(optimizationProgressPct)}%</span>
+            </div>
+            <Progress value={optimizationProgressPct} className="h-2" />
+            {typeof optimizationStepCurrent === "number" && typeof optimizationStepTotal === "number" && optimizationStepTotal > 0 && (
+              <p className="text-xs text-slate-500">
+                Progreso de clústeres: {optimizationStepCurrent}/{optimizationStepTotal}
+              </p>
+            )}
+          </div>
+        )}
         {optimizationError && <p className="text-xs text-red-700 mt-1">{optimizationError}</p>}
       </div>
 
@@ -138,29 +314,18 @@ export function Planning() {
               <Tabs defaultValue="basic">
                 <TabsList>
                   <TabsTrigger value="basic">Básicos</TabsTrigger>
-                  <TabsTrigger value="advanced">Avanzados</TabsTrigger>
-                  <TabsTrigger value="constraints">Restricciones</TabsTrigger>
+                  <TabsTrigger value="advanced">Parámetros efectivos</TabsTrigger>
                 </TabsList>
 
                 <TabsContent value="basic" className="space-y-4 mt-4">
-                  <div className="grid grid-cols-2 gap-4">
-                    <div>
-                      <Label htmlFor="run-name">Nombre de Corrida</Label>
-                      <Input 
-                        id="run-name" 
-                        placeholder="Ej: Optimización Despacho 08-04-2026"
-                        defaultValue={`Optimización ${deliveryDate}`}
-                      />
-                    </div>
-                    <div>
-                      <Label htmlFor="delivery-date">Fecha de Entrega</Label>
-                      <Input 
-                        id="delivery-date" 
-                        type="date" 
-                        value={deliveryDate}
-                        onChange={(e) => setDeliveryDate(e.target.value)}
-                      />
-                    </div>
+                  <div>
+                    <Label htmlFor="delivery-date">Fecha de Entrega</Label>
+                    <Input
+                      id="delivery-date"
+                      type="date"
+                      value={deliveryDate}
+                      onChange={(e) => setDeliveryDate(e.target.value)}
+                    />
                   </div>
 
                   <div>
@@ -184,19 +349,9 @@ export function Planning() {
                     {uploadError && <p className="text-xs text-red-700 mt-1">{uploadError}</p>}
                   </div>
 
-                  <div>
-                    <Label htmlFor="objective">Función Objetivo</Label>
-                    <Select defaultValue="balanced">
-                      <SelectTrigger id="objective">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="balanced">Balanceado: Costo + Cumplimiento</SelectItem>
-                        <SelectItem value="cost">Minimizar Costo Total</SelectItem>
-                        <SelectItem value="compliance">Maximizar Cumplimiento</SelectItem>
-                        <SelectItem value="distance">Minimizar Distancia</SelectItem>
-                      </SelectContent>
-                    </Select>
+                  <div className="rounded-md border border-slate-200 bg-slate-50 p-3">
+                    <p className="text-sm font-medium text-slate-900">Objetivo activo: Minimizar distancia total</p>
+                    <p className="text-xs text-slate-600 mt-1">La versión actual del backend opera con este objetivo.</p>
                   </div>
                 </TabsContent>
 
@@ -247,56 +402,6 @@ export function Planning() {
                   </div>
 
                   <div>
-                    <Label htmlFor="time-dependency">Dependencia Temporal</Label>
-                    <Select defaultValue="traffic">
-                      <SelectTrigger id="time-dependency">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="traffic">TDVRPTW τ_ij(t) (hora/día)</SelectItem>
-                        <SelectItem value="static">Estático (promedio)</SelectItem>
-                        <SelectItem value="historical">Histórico ML</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                </TabsContent>
-
-                <TabsContent value="constraints" className="space-y-4 mt-4">
-                  <div className="space-y-3">
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <Label>Permitir División de Pedidos</Label>
-                        <p className="text-xs text-slate-500">Si pedido excede capacidad, dividir automáticamente</p>
-                      </div>
-                      <Switch defaultChecked />
-                    </div>
-
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <Label>Respetar Ventanas Horarias Estrictas</Label>
-                        <p className="text-xs text-slate-500">No permitir violaciones de tiempo</p>
-                      </div>
-                      <Switch defaultChecked />
-                    </div>
-
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <Label>Habilitar Retornos a Depot</Label>
-                        <p className="text-xs text-slate-500">Permitir retornos intermedios para reabastecimiento</p>
-                      </div>
-                      <Switch />
-                    </div>
-
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <Label>Considerar Turnos de Vehículos</Label>
-                        <p className="text-xs text-slate-500">Asignar según turno (mañana/tarde/noche)</p>
-                      </div>
-                      <Switch defaultChecked />
-                    </div>
-                  </div>
-
-                  <div>
                     <Label htmlFor="max-route-time">Tiempo Máximo por Ruta (horas)</Label>
                     <Input
                       id="max-route-time"
@@ -308,8 +413,14 @@ export function Planning() {
                   </div>
 
                   <div>
-                    <Label htmlFor="max-wait-time">Espera Máxima Permitida (min)</Label>
-                    <Input id="max-wait-time" type="number" defaultValue="60" />
+                    <Label htmlFor="max-vehicles">Máximo de Vehículos Globales</Label>
+                    <Input
+                      id="max-vehicles"
+                      type="number"
+                      min="1"
+                      value={maxVehicles}
+                      onChange={(e) => setMaxVehicles(Number(e.target.value))}
+                    />
                   </div>
                 </TabsContent>
               </Tabs>
@@ -335,10 +446,6 @@ export function Planning() {
                   Ejecutar Optimización
                 </>
               )}
-            </Button>
-            <Button variant="outline" size="lg">
-              <Settings className="size-5 mr-2" />
-              Guardar Config
             </Button>
           </div>
         </div>

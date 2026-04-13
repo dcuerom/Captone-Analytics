@@ -50,7 +50,7 @@ export function VehicleDetail() {
             </span>
           </div>
           <p className="text-slate-600">Detalle de ruta y paradas asignadas</p>
-          {error && <p className="text-xs text-amber-600 mt-1">Backend no disponible, usando datos mock.</p>}
+          {error && <p className="text-xs text-amber-600 mt-1">Backend no disponible. Verifica python backend/api_server.py y npm run dev.</p>}
         </div>
         <Link to="/fleet-map">
           <Button>

@@ -31,7 +31,7 @@ export function DataQuality() {
       <div>
         <h1 className="text-3xl font-semibold text-slate-900 mb-2">Calidad de Datos</h1>
         <p className="text-slate-600">Validación y verificación de pedidos antes de optimización</p>
-        {error && <p className="text-xs text-amber-600 mt-1">Backend no disponible, usando datos mock.</p>}
+        {error && <p className="text-xs text-amber-600 mt-1">Backend no disponible. Verifica python backend/api_server.py y npm run dev.</p>}
       </div>
 
       {/* Summary Cards */}

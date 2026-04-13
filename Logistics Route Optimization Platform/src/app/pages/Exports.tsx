@@ -22,7 +22,7 @@ export function Exports() {
       <div>
         <h1 className="text-3xl font-semibold text-slate-900 mb-2">Exportación y Trazabilidad</h1>
         <p className="text-slate-600">Descargue resultados y audite el historial de optimizaciones</p>
-        {error && <p className="text-xs text-amber-600 mt-1">Backend no disponible, usando datos mock.</p>}
+        {error && <p className="text-xs text-amber-600 mt-1">Backend no disponible. Verifica python backend/api_server.py y npm run dev.</p>}
       </div>
 
       <Tabs defaultValue="exports">
