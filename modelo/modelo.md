@@ -43,6 +43,7 @@ $K_{22}: \text{Subconjunto de camiones designados para el turno 2 y para la ruta
 - $d_{max}: \text{Duración máxima que puede tener una ruta}$
 - $M: \text{Número positivo suficientemente grande (Big-M)}$
 - $\alpha_w: \text{Peso de penalización por tiempo de espera en la función objetivo}$
+- $\Delta_{descanso}: \text{Tiempo de descanso obligatorio entre jornadas (2 horas = 120 min)}$
 
 ---
 
@@ -51,8 +52,9 @@ $K_{22}: \text{Subconjunto de camiones designados para el turno 2 y para la ruta
 $X_{(i,t)jk} = \text{1 si }k \text{ utiliza el arco } ((i,t),j) \space | \space 0 \text{ En otro caso}$
 
 $ts_{ik} =  \text{Tiempo de arribo del camión }k \text{ al cliente }i$
+$suavizamiento = 15 \text{ min}$
 
-$W_{ik} = \max(0, \ a_i - ts_{ik}): \text{Tiempo de espera del camión } k \text{ en el cliente } i \text{ (antes de apertura de ventana)}$
+$W_{ik} = \max(0, \ (a_i - 15) - ts_{ik}): \text{Tiempo de espera del camión } k \text{ en el cliente } i \text{ (antes de apertura de ventana suave)}$
 
 ---
 
@@ -62,7 +64,7 @@ $$
 \min: \underbrace{\sum_{i=1}^{I} \sum_{j=1}^{I} \sum_{t=1}^{T} \sum_{k=1}^K X_{(i,t),j,k} \cdot C_{i,j}}_{\text{Costo de transporte}} + \underbrace{\alpha_w \cdot \sum_{i \in I} \sum_{k \in K} W_{ik}}_{\text{Penalización por espera}}
 $$
 
-Donde $W_{ik} = \max(0, \ a_i - ts_{ik})$ captura el tiempo improductivo que experimenta el camión $k$ al llegar antes de la apertura de ventana del cliente $i$. El parámetro $\alpha_w$ controla la importancia relativa de minimizar la espera frente al costo de transporte.
+Donde $W_{ik} = \max(0, \ (a_i - 15) - ts_{ik})$ captura el tiempo improductivo que experimenta el camión $k$ al llegar antes de la apertura de la ventana suave del cliente $i$. El parámetro $\alpha_w$ controla la importancia relativa de minimizar la espera frente al costo de transporte.
 
 ---
 
@@ -112,18 +114,19 @@ ts_{i,k} + s_i + aten + \sum_{t=1}^{T} (X_{(i,t),j,k} \cdot T_{ij,t}) - M(1-\sum
 $$
 
 $$
-\text{7. Ventanas de tiempo :}\\
+\text{7. Ventanas de tiempo suaves (con suavizamiento de 15 min en ambos extremos):}\\
 
 \sum_{k=1}^{K} ts_{i,k} 
 
 \geq
-a_i \ , \ \ \forall i \in I
+a_i - 15 \ , \ \ \forall i \in I
 \\ \ \\
 \sum_{k=1}^{K} ts_{i,k} 
 
 \leq
-b_i \ , \ \ \forall i \in I
+b_i + 15 \ , \ \ \forall i \in I
 $$
+
 
 $$
 \text{8. Tiempo de atención en el intervalo:}\\
@@ -155,44 +158,41 @@ ts_{i,k}
 $$
 
 $$
-\text{10. Salida del CD - Turno 1 - Ruta 1:}\\
+\text{10. Salida del CD (JIT permitida dentro de ventana) - Turno 1 - Ruta 1:}\\
 
-ts_{0,k} + s_0 = 540 
+540 \leq ts_{0,k} + s_0 \leq 720 
  \ \ \forall k \in K_{11}
 $$
 
 $$
-\text{11. Salida del CD - Turno 1 - Ruta 2:}\\
+\text{11. Salida del CD (JIT permitida dentro de ventana) - Turno 1 - Ruta 2:}\\
 
-ts_{0,k} + s_0 = 900
+900 \leq ts_{0,k} + s_0 \leq 1080
  \ \ \forall k \in K_{12}
 $$
 
 $$
-\text{12. Salida del CD - Turno 2 - Ruta 1:}\\
+\text{12. Salida del CD (JIT permitida dentro de ventana) - Turno 2 - Ruta 1:}\\
 
 \\
-ts_{0,k} + s_0 = 660 
+660 \leq ts_{0,k} + s_0 \leq 840
 
  \ \ \forall k \in K_{21}
 $$
 
 $$
-\text{13. Salida del CD - Turno 2 - Ruta 2:}\\
+\text{13. Salida del CD (JIT permitida dentro de ventana) - Turno 2 - Ruta 2:}\\
 
 \\
-ts_{0,k} + s_0 = 1020
+1020 \leq ts_{0,k} + s_0 \leq 1200
 
  \ \ \forall k \in K_{22}
 $$
 
 $$
-\text{14. Descansos:}\\
+\text{14. Duración Total del Turno:}\\
 
-\sum_{t=1}^{T}\sum_{j=1}^{I}\sum_{i=1}^{I} X_{(i,t),j,k}*T_{i,t,j}
-
-\leq
-d_{max} \ , \ \ \forall k \in K
+ts_{retorno,k}^{(R)} - ts_{0,k}^{(R)} \leq d_{max} \ , \ \ \forall R, \forall k \in K
 $$
 
 $$
@@ -255,3 +255,10 @@ $$
 
 | \bigcup_{c \in C} \{ \text{Camiones Físicos Activos en el instante } t \} | \le N_{total} \quad \forall t \in \text{Horizonte}
 $$
+
+$$
+\text{21. Descanso Obligatorio entre Jornadas para el mismo Camión Físico:} \\
+\\ \ \\
+ts_{0,k}^{(R_2)} \geq t_{retorno,k}^{(R_1)} + \Delta_{descanso} \quad \forall R_1, R_2 \in \text{Rutas consecutivas del camión } k
+$$
+

@@ -22,7 +22,7 @@ from modelo.funciones.tiempos_viaje import tau_ij_vec
 class TDVRPTWProblem(ElementwiseProblem):
     def __init__(self, df_cluster, matriz_dist_m, depot_id, 
                  t_inicio=540.0, cap_vol_cm3=10_000_000, cap_peso_g=5_000_000, 
-                 dia_semana=0, factor_s=1.2, d_max_min=300.0, alpha_espera=1.0):
+                 dia_semana=0, factor_s=1.2, d_max_min=240.0, alpha_espera=1.0, holgura_ventana=30.0):
         
         self.df_cluster = df_cluster.copy()
         
@@ -64,8 +64,9 @@ class TDVRPTWProblem(ElementwiseProblem):
         self.dia_semana = dia_semana
         self.factor_s = factor_s
         self.aten_fijo = 5.0 # Minutos de atención
-        self.d_max_min = d_max_min # Límite de 5 horas máximo (Restricción 14)
+        self.d_max_min = d_max_min # Límite de duración total del turno (Restricción 14)
         self.alpha_espera = alpha_espera # Peso de penalización por tiempo de espera
+        self.holgura_ventana = holgura_ventana # Tolerancia para violaciones de ventana de tiempo
         
         # ElementwiseProblem configurado:
         # n_var = permutación de índices de [0... n_clientes-1]
@@ -79,12 +80,13 @@ class TDVRPTWProblem(ElementwiseProblem):
                          xu=n_clientes - 1, 
                          vtype=int)
 
-        # Plantillas de rotación de turnos (K11, K12, K21, K22)
-        self.plantillas_turnos = [
-            [540.0, 900.0],   # Plantilla K1 (K11, K12): Salida 09:00, 15:00
-            [660.0, 1020.0]   # Plantilla K2 (K21, K22): Salida 11:00, 17:00
+        # Plantillas de ventanas de salida (K11, K12, K21, K22)
+        # El modelo permite salir en cualquier momento dentro de estos rangos.
+        self.ventanas_salida_turnos = [
+            [[540.0, 720.0], [900.0, 1080.0]],   # Plantilla K1: Mañana [09:00-12:00], Tarde [15:00-18:00]
+            [[660.0, 840.0], [1020.0, 1200.0]]   # Plantilla K2: Mañana [11:00-14:00], Tarde [17:00-20:00]
         ]
-        self.costo_fijo_camion = 100_000.0 # Castigo por usar un nuevo camión físico
+        self.costo_fijo_camion = 100000 # Castigo por usar un nuevo camión físico
         
     def _evaluate(self, x, out, *args, **kwargs):
         """
@@ -105,12 +107,54 @@ class TDVRPTWProblem(ElementwiseProblem):
         ruta_act = []
         tiempos_llegada = {}
         
+        def get_best_start_shift(c_id):
+            mejor_costo = float('inf')
+            m_p_idx = 0
+            m_t_idx = 0
+            m_cam_t_salida = self.ventanas_salida_turnos[0][0][0]
+            
+            a_c = self.a_dict[c_id]
+            b_c = self.b_dict[c_id]
+            dist_c = float(self.matriz_dist.loc[self.depot_id, c_id])
+            
+            for p_idx, plantilla in enumerate(self.ventanas_salida_turnos):
+                for t_idx, ventana in enumerate(plantilla):
+                    t_base = ventana[0]
+                    # Estimación
+                    t_v = float(tau_ij_vec(np.array([dist_c]), np.array([t_base]), self.dia_semana)[0])
+                    t_lleg = t_base + t_v
+                    
+                    t_salida_test = t_base
+                    if t_lleg < a_c:
+                        esp_evitable = a_c - t_lleg
+                        t_salida_test = min(t_salida_test + esp_evitable, ventana[1])
+                        
+                    t_v_real = float(tau_ij_vec(np.array([dist_c]), np.array([t_salida_test]), self.dia_semana)[0])
+                    t_lleg_real = t_salida_test + t_v_real
+                    
+                    espera_final = max(0.0, a_c - t_lleg_real)
+                    violacion_final = max(0.0, t_lleg_real - b_c)
+                    
+                    # Coste ficticio: se castiga severamente la violación (legitimando la hora de llegada natural superior a la ventana)
+                    costo_test = violacion_final * 10000.0 + espera_final
+                    
+                    if costo_test < mejor_costo:
+                        mejor_costo = costo_test
+                        m_p_idx = p_idx
+                        m_t_idx = t_idx
+                        m_cam_t_salida = t_salida_test
+            return m_p_idx, m_t_idx, m_cam_t_salida
+
         num_camiones_fisicos = 1
-        plantilla_idx = 0
-        turnos_actual = self.plantillas_turnos[plantilla_idx]
-        turno_idx = 0
-        cam_t_salida = turnos_actual[turno_idx]
+        
+        if ruta_candidata:
+            plantilla_idx, turno_idx, cam_t_salida = get_best_start_shift(ruta_candidata[0])
+        else:
+            plantilla_idx, turno_idx, cam_t_salida = 0, 0, self.ventanas_salida_turnos[0][0][0]
+
+        ventanas_actual = self.ventanas_salida_turnos[plantilla_idx]
         t_actual = cam_t_salida
+        
         nodo_previo = self.depot_id
         detalle_nodos = {}
         detalle_camiones = []  # Métricas por camión
@@ -120,7 +164,7 @@ class TDVRPTWProblem(ElementwiseProblem):
         cam_t_espera = 0.0
         cam_t_servicio = 0.0
         cam_dist = 0.0
-        
+
         for cliente_id in ruta_candidata:
             vol_p = self.vol_dict[cliente_id]
             peso_p = self.peso_dict[cliente_id]
@@ -131,12 +175,19 @@ class TDVRPTWProblem(ElementwiseProblem):
             t_ini_tent = max(t_actual + t_viaj_tent, self.a_dict[cliente_id])
             t_fin_tent = t_ini_tent + self.aten_fijo
             
+            # Limite superior relajado (b_p + holgura_ventana)
+            b_p_tent = self.b_dict[cliente_id]
+            b_p_relaxed_tent = b_p_tent + self.holgura_ventana
+            
             dist_retorno_tent = float(self.matriz_dist.loc[cliente_id, self.depot_id])
             t_viaj_ret_tent = float(tau_ij_vec(np.array([dist_retorno_tent]), np.array([t_fin_tent]), self.dia_semana)[0])
-            tiempo_conduccion_estimado = cam_t_viaje + t_viaj_tent + t_viaj_ret_tent
             
-            # SPLIT CONDICIONAL (Activa regreso al depósito si se violan capacidades o turno máximo de conducción)
-            if (vol_actual + vol_p > self.cap_vol_cm3) or (peso_actual + peso_p > self.cap_peso_g) or (tiempo_conduccion_estimado > self.d_max_min):
+            # Cálculo modificado: Duración de todo el viaje partiendo desde la base hasta retornar a ella
+            t_retorno_estimado = t_fin_tent + t_viaj_ret_tent
+            duracion_turno_estimada = t_retorno_estimado - cam_t_salida
+            
+            # SPLIT CONDICIONAL (Activa regreso al depósito si se violan capacidades o la duración del turno supera el bloque d_max)
+            if (vol_actual + vol_p > self.cap_vol_cm3) or (peso_actual + peso_p > self.cap_peso_g) or (duracion_turno_estimada > self.d_max_min):
                 # Regreso del camión actual al depósito
                 dist_reg = float(self.matriz_dist.loc[nodo_previo, self.depot_id])
                 d_ret = np.array([dist_reg])
@@ -166,18 +217,31 @@ class TDVRPTWProblem(ElementwiseProblem):
                     rutas_camiones.append(ruta_act)
                 
                 # LÓGICA MULTI-VIAJE (K11->K12 o K21->K22)
+                t_retorno_anterior = t_actual + t_viaje_reg
                 turno_idx += 1
-                if turno_idx < len(turnos_actual):
-                    # El MISMO camión físico toma el siguiente turno
-                    cam_t_salida = turnos_actual[turno_idx]
+                
+                # Intentamos re-usar el camión si tiene tiempo de descanso (120 min)
+                puebe_reuse = False
+                if turno_idx < len(ventanas_actual):
+                    t_min_salida_descanso = t_retorno_anterior + 120.0 # 2 horas de break
+                    if t_min_salida_descanso <= ventanas_actual[turno_idx][1]:
+                        puebe_reuse = True
+                        cam_t_salida = max(ventanas_actual[turno_idx][0], t_min_salida_descanso)
+                
+                if puebe_reuse:
+                    # El MISMO camión físico toma el siguiente turno tras su descanso
+                    # Aplicamos JIT para el nuevo turno si es necesario
+                    # (cliente_id es el que no cupo en el turno anterior)
+                    dist_next = float(self.matriz_dist.loc[self.depot_id, cliente_id])
+                    t_v_next = float(tau_ij_vec(np.array([dist_next]), np.array([cam_t_salida]), self.dia_semana)[0])
+                    if cam_t_salida + t_v_next < self.a_dict[cliente_id]:
+                        espera_extra = self.a_dict[cliente_id] - (cam_t_salida + t_v_next)
+                        cam_t_salida = min(cam_t_salida + espera_extra, ventanas_actual[turno_idx][1])
                 else:
-                    # El camión actual agotó sus turnos. Contrata un nuevo camión físico alternativo.
+                    # El camión anterior no puede o no tiene más turnos. Nuevo camión físico.
                     num_camiones_fisicos += 1
-                    plantilla_idx = (plantilla_idx + 1) % len(self.plantillas_turnos) # Alterna entre 0 y 1
-                    turnos_actual = self.plantillas_turnos[plantilla_idx]
-                    
-                    turno_idx = 0
-                    cam_t_salida = turnos_actual[turno_idx]
+                    plantilla_idx, turno_idx, cam_t_salida = get_best_start_shift(cliente_id)
+                    ventanas_actual = self.ventanas_salida_turnos[plantilla_idx]
 
                 # Reseteo camión
                 vol_actual = 0.0
@@ -207,14 +271,23 @@ class TDVRPTWProblem(ElementwiseProblem):
             t_espera = 0.0
             t_violacion = 0.0
             
-            if t_llegada_real < a_p:
-                t_espera = a_p - t_llegada_real
-                t_inicio_servicio = a_p
+            # NUEVO: Lógica de Ventanas Suaves (15 min suavizamiento en ambos extremos)
+            # Solo aplicable a clientes (a_p y b_p vienen de a_dict/b_dict que solo tienen clientes)
+            suavizamiento = 15.0
+            a_p_eff = a_p - suavizamiento
+            b_p_eff = b_p + suavizamiento
+            
+            t_espera = 0.0
+            t_violacion = 0.0
+            
+            if t_llegada_real < a_p_eff:
+                t_espera = a_p_eff - t_llegada_real
+                t_inicio_servicio = a_p_eff
             else:
                 t_inicio_servicio = t_llegada_real
                 
-            if t_inicio_servicio > b_p:
-                t_violacion = t_inicio_servicio - b_p
+            if t_inicio_servicio > b_p_eff:
+                t_violacion = t_inicio_servicio - b_p_eff
                 restricciones_fail += t_violacion
             
             cam_t_viaje += t_viaje
@@ -230,13 +303,15 @@ class TDVRPTWProblem(ElementwiseProblem):
                 "t_llegada_real": t_llegada_real,
                 "a_ventana": a_p,
                 "b_ventana": b_p,
+                "a_ventana_relaxed": a_p - suavizamiento,
+                "b_ventana_relaxed": b_p + suavizamiento,
                 "t_espera_min": t_espera,
                 "t_inicio_servicio": t_inicio_servicio,
                 "t_servicio_min": self.aten_fijo,
                 "volumen_cm3": vol_p,
                 "peso_g": peso_p,
                 "t_violacion_min": t_violacion,
-                "cumple_ventana": t_violacion == 0.0
+                "cumple_ventana": t_violacion <= 0.0
             }
                 
             t_actual = t_inicio_servicio + self.aten_fijo

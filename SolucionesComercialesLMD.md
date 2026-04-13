@@ -161,7 +161,7 @@ Referencias públicas sugieren que, en mercados maduros, **first‑attempt succe
 - First‑attempt success: 88% ▓▓▓▓▓▓▓▓░░ → 97% ▓▓▓▓▓▓▓▓▓▓  
 - On‑time (macro‑benchmark): 90% ▓▓▓▓▓▓▓▓░░ → 99% ▓▓▓▓▓▓▓▓▓▓  
 
-Estas bandas deben “aterrizarse” con tu promesa (slot de 30–120 min vs “2‑day delivery”), densidad y mix de reintentos/locker. citeturn8search14turn44view0
+Estas bandas deben “aterrizarse” con tu promesa (slot de 15 min vs “2‑day delivery”), densidad y mix de reintentos/locker. citeturn8search14turn44view0
 
 ## Evidencia cuantitativa: claims de desempeño y evaluaciones independientes
 

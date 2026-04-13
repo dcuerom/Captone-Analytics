@@ -40,12 +40,18 @@ class VehiculoGlobal:
         if self.plantilla_base is not None and tipo_k is not None:
             if self.plantilla_base != tipo_k:
                 return False
+
+        # 2. Regla de unicidad de jornada (No repetir K11, K12, etc. en el mismo vehículo)
+        for b_asignado in self.bloques:
+            if b_asignado.subc_k == bloque.subc_k:
+                return False
                 
-        # 2. Regla física temporal de superposición
+        # 3. Regla física temporal de superposición
         if not self.bloques:
             return True
         ultimo = self.bloques[-1]
-        return bloque.t_salida >= ultimo.t_retorno
+        # RESTRICCIÓN 21: Garantizar 120 min de descanso entre jornadas
+        return bloque.t_salida >= ultimo.t_retorno + 120.0
         
     def asignar(self, bloque: BloqueRuta):
         if self.plantilla_base is None:
@@ -66,7 +72,8 @@ def asignar_y_reportar(
     rutas_dict_global=None,
     G: Optional[nx.MultiDiGraph] = None,
     mapa_dir=None,
-    depot_coords=None
+    depot_coords=None,
+    tiempo_computo_min=0.0
 ):
     """
     1. Desempaqueta todos los resultados intra-cluster.
@@ -113,8 +120,8 @@ def asignar_y_reportar(
             if bloque.t_retorno > t_fin_global:
                 t_fin_global = bloque.t_retorno
                 
-    # 2. Ordenamiento Temporal Puro (Earliest Departure First)
-    todos_bloques.sort(key=lambda b: (b.t_salida, b.t_retorno))
+    # 2. Ordenamiento FFD (First Fit Decreasing) por duración de la ruta (Mayor a Menor)
+    todos_bloques.sort(key=lambda b: (b.t_retorno - b.t_salida), reverse=True)
     
     # 3. Empaquetamiento en Flota Fija
     flota = [VehiculoGlobal(v_id) for v_id in range(1, max_vehiculos + 1)]
@@ -189,6 +196,7 @@ def asignar_y_reportar(
                 "Tiempo_Viaje_min": 0.0,
                 "Hora_Llegada": min_a_hora(b.t_salida),
                 "Ventana": "—",
+                "Cierre_Relajado": "—",
                 "Inicio_Servicio": min_a_hora(b.t_salida),
                 "Tiempo_Servicio_min": "—",
                 "Vol_L": "—",
@@ -215,6 +223,7 @@ def asignar_y_reportar(
                 t_real = float(det.get("t_llegada_real", 0))
                 a_v = float(det.get("a_ventana", 0))
                 b_v = float(det.get("b_ventana", 1440))
+                b_v_rel = float(det.get("b_ventana_relaxed", b_v + 30.0))
                 t_serv_ini = float(det.get("t_inicio_servicio", 0))
                 t_serv_dur = float(det.get("t_servicio_min", 0))
                 
@@ -239,6 +248,7 @@ def asignar_y_reportar(
                     "Tiempo_Viaje_min": round(t_viaje, 1),
                     "Hora_Llegada": min_a_hora(t_real),
                     "Ventana": f"[{min_a_hora(a_v)}, {min_a_hora(b_v)}]",
+                    "Cierre_Relajado": min_a_hora(b_v_rel),
                     "Inicio_Servicio": min_a_hora(t_serv_ini),
                     "Tiempo_Servicio_min": round(t_serv_dur, 1),
                     "Vol_L": round(vol_l, 1),
@@ -268,6 +278,7 @@ def asignar_y_reportar(
                 "Tiempo_Viaje_min": round(t_ret, 1),
                 "Hora_Llegada": min_a_hora(b.t_retorno),
                 "Ventana": "—",
+                "Cierre_Relajado": "—",
                 "Inicio_Servicio": "—",
                 "Tiempo_Servicio_min": "—",
                 "Vol_L": "—",
@@ -363,15 +374,22 @@ def asignar_y_reportar(
     pct_backlog = (pedidos_no_atendidos / total_pedidos_input * 100) if total_pedidos_input > 0 else 0
     
     # Función objetivo compuesta
-    penalizacion_espera = espera_total_global  # Se reporta sin multiplicar por alpha (valor crudo)
+    alpha_espera = 50000.0  # Mismo multiplicador usado en el algoritmo genético
+    costo_fijo_camion = 100000.0  # Opex por activación de camión físico
+    
     fo_costo_ruta = costo_total_global
-    fo_total = fo_costo_ruta + penalizacion_espera
+    costo_flota = vehiculos_usados * costo_fijo_camion
+    costo_espera_penalizada = espera_total_global * alpha_espera
+    
+    fo_total = fo_costo_ruta + costo_flota + costo_espera_penalizada
     
     kpis = {
         "KPI": [
-            "Función Objetivo Total",
-            "Costo de Ruta (F.O. componente transporte)",
-            "Penalización por Espera Total (min)",
+            "Función Objetivo Total ($)",
+            "Costos de Ruta por Transporte ($)",
+            "Costos Fijos por Uso de Flota ($)",
+            "Valor de Penalización por Espera ($)",
+            "Tiempo de Espera Total (min)",
             "Distancia Total Recorrida (km)",
             "Distancia Relativa (km/pedido)",
             "Vehículos Utilizados",
@@ -390,13 +408,16 @@ def asignar_y_reportar(
             "Espera Total Acumulada (min)",
             "Emisiones CO2 Totales (kg)",
             "Emisiones CO2 por Pedido (kg)",
-            "Litros Diesel Estimados"
+            "Litros Diesel Estimados",
+            "Tiempo de Cómputo (min)"
 
         ],
         "Valor": [
             round(fo_total, 2),
             round(fo_costo_ruta, 2),
-            round(penalizacion_espera, 1),
+            round(costo_flota, 2),
+            round(costo_espera_penalizada, 2),
+            round(espera_total_global, 1),
             round(dist_total_km, 2),
             round(dist_total_km / total_clientes, 2) if total_clientes > 0 else 0,
             vehiculos_usados,
@@ -415,7 +436,8 @@ def asignar_y_reportar(
             round(espera_total_global, 1),
             round(co2_total_kg, 2),
             round(co2_por_pedido_kg, 3),
-            round(litros_consumidos, 2)
+            round(litros_consumidos, 2),
+            round(tiempo_computo_min, 2)
         ]
     }
     

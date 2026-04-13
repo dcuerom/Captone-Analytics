@@ -192,7 +192,7 @@ def run_clustering_pipeline(
             "Verifica la fecha seleccionada y las columnas latitud/longitud del CSV."
         )
     
-    # 2. Normalización (alpha=1.0 por defecto, pero escalable)
+    # 2. Normalización (alpha configurable para dar más/menos peso temporal)
     X_scaled, _ = normalize_and_weight(X, alpha_time=alpha_time)
     
     # 3. DBSCAN
