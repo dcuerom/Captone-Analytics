@@ -1,20 +1,22 @@
 # Anexo: Documentación de Uso de Inteligencia Artificial
-
 ## Prompts y Respuestas — Proyecto Capstone Analytics
 
-**Proyecto:** Optimización Logística con Algoritmo Genético (TDVRPTW)
-**Equipo:** Ingeniería Industrial — UDD
-**Herramienta IA utilizada:** Antigravity (Google DeepMind) — Asistente de código IA
+**Proyecto:** Optimización Logística con Algoritmo Genético (TDVRPTW)  
+**Equipo:** Ingeniería Industrial — UDD  
+**Herramienta de IA utilizada:** Antigravity (Google DeepMind) — Asistente de generación de código  
 **Período documentado:** Abril 2026
 
 ---
 
-> **Nota sobre el uso de IA en este proyecto:**Conforme al marco académico establecido, el uso de IA en este proyecto tuvo dos propósitos fundamentales:
+> **Nota sobre el uso de inteligencia artificial en este proyecto:**
 >
-> 1. **Generación de código Python**: Los integrantes del equipo actuaron como ingenieros industriales que definieron las especificaciones funcionales del sistema (qué debía hacer el código), mientras que la IA generó la implementación técnica. Cada pieza de código fue revisada y validada por el equipo.
-> 2. **Tratamiento de datos**: La IA asistió en el procesamiento y análisis de grandes volúmenes de datos, siempre bajo las instrucciones y supervisión del equipo.
+> Conforme al marco académico establecido, el uso de herramientas de IA en este proyecto respondió a dos propósitos definidos:
 >
-> Todo el contenido de este anexo es el registro fiel de las conversaciones sostenidas con la herramienta de IA.
+> 1. **Generación de código Python:** Los integrantes del equipo actuaron como ingenieros industriales responsables de definir las especificaciones funcionales del sistema (qué debía hacer el código), mientras que la herramienta de IA se encargó de producir la implementación técnica. Cada fragmento de código generado fue revisado y validado por el equipo antes de su incorporación al proyecto.
+>
+> 2. **Tratamiento de datos:** La herramienta de IA asistió en el procesamiento y análisis de grandes volúmenes de datos, en todo momento bajo las instrucciones y la supervisión directa del equipo.
+>
+> El contenido de este anexo constituye el registro fiel de las conversaciones sostenidas con la herramienta de IA a lo largo del proyecto.
 
 ---
 
@@ -22,130 +24,125 @@
 
 ## SECCIÓN I: MODELAMIENTO MATEMÁTICO Y EVALUACIÓN DEL MODELO TDVRPTW
 
-**Conversación de referencia:** *"Evaluating TDVRPTW Mathematical Model"*
-**Fecha:** Abril 2026
+**Conversación de referencia:** *"Evaluating TDVRPTW Mathematical Model"*  
+**Fecha:** Abril 2026  
 **Propósito:** Generar el modelo matemático formal del problema TDVRPTW y su integración con el evaluador PyMoo.
 
 ---
 
 ### Prompt 1.1 — Solicitud de implementación del modelo híbrido Pyomo + PyMoo
 
-**Contexto previo:** El equipo ya contaba con una estructura Pyomo (`modelo/modelo.py`) y necesitaba incorporar un evaluador de alta performance para el Algoritmo Genético.
+**Contexto previo:** El equipo disponía de una estructura Pyomo (`modelo/modelo.py`) y requería incorporar un evaluador de alto rendimiento para el Algoritmo Genético.
 
 **Prompt del usuario:**
 
 > Necesito que implementes el modelo de optimización híbrido integrando Pyomo con PyMoo. El modelo debe:
->
 > - Mantener la estructura formal de Pyomo como referencia algebraica del negocio
 > - Crear un nuevo archivo `modelo/pymoo_problem.py` que implemente `TDVRPTWProblem(Problem)`
 > - El evaluador debe usar `tau_ij_vec()` para vectorizar los cálculos de tiempo de viaje
 > - Las restricciones de capacidad y ventanas de tiempo deben implementarse como hard constraints en `out["G"]`
 > - La función objetivo `out["F"]` debe minimizar la distancia total (en metros) × factor S
 
-**Respuesta del asistente IA:**
+**Respuesta del asistente de IA:**
 
-El asistente propuso el siguiente plan de implementación:
+El asistente presentó el siguiente plan de implementación:
 
 **Plan de Implementación: Integración Híbrida Pyomo + PyMoo**
 
 **1. Dualidad del Planteamiento (`modelo/`)**
 
-- **Mantener Pyomo**: El archivo actual `modelo/modelo.py` conserva su estructura formal `ConcreteModel` exacta, proveyendo un esqueleto de referencia de negocio.
-- **[NUEVO] `modelo/pymoo_problem.py`**:
-  - Implementará `TDVRPTWProblem(Problem)`. Se usará `Problem` (Vectorizado) en vez de `ElementwiseProblem` para aprovechar masivamente `tau_ij_vec()`.
-  - **Uso de `tau_ij_vec`**: El método `_evaluate(self, x, out)` iterará sobre los tramos del recorrido, pero procesará a *toda la población (cientos de individuos) en paralelo matriz a matriz*.
-  - **Restricciones Hard**:
-    - Las violaciones de capacidad o impuntualidades de ventana (pasado el límite `b`) dictarán penalizaciones físicas en `out["G"]`, obligando al Algoritmo a rechazar individuos infactibles usando las reglas de dominancia de Deb.
-    - `out["F"]` permanecerá dictaminando puramente la sumatoria minimizada de la distancia en metros × factor S.
+- **Mantener Pyomo:** El archivo `modelo/modelo.py` conserva su estructura formal `ConcreteModel`, cumpliendo la función de esqueleto algebraico de referencia del negocio.
+- **[NUEVO] `modelo/pymoo_problem.py`:**
+  - Se implementó la clase `TDVRPTWProblem(Problem)`. Se optó por `Problem` (vectorizado) en vez de `ElementwiseProblem`, con el objetivo de aprovechar el procesamiento matricial de `tau_ij_vec()`.
+  - **Uso de `tau_ij_vec`:** El método `_evaluate(self, x, out)` iteró sobre los tramos del recorrido, procesando a toda la población (cientos de individuos) en paralelo, matriz a matriz.
+  - **Restricciones Hard:**
+    - Las violaciones de capacidad o de ventana de tiempo (llegada posterior al límite `b`) se registraron como penalizaciones físicas en `out["G"]`, forzando al algoritmo a rechazar individuos infactibles mediante las reglas de dominancia de Deb.
+    - `out["F"]` se reservó exclusivamente para la sumatoria minimizada de la distancia en metros multiplicada por el factor S.
 
 **2. Refactorización en `algoritmo/`**
 
-- **[MODIFY] `algoritmo/genetic_algorithm.py`**: Se orquestará usando la librería oficial `from pymoo.algorithms.soo.nonconvex.ga import GA`, inyectando la matriz de clientes y la configuración a `TDVRPTWProblem`, y generando los cruces empleando `OrderCrossover()` nativo de PyMoo.
-- **[MODIFY] `algoritmo/tabu_search.py`**: Se mantendrá su ciclo nativo, pero al requerir ponderar la bondad de un vecino, invocará centralizadamente al simulador inyectando el cromosoma al vector de `TDVRPTWProblem().evaluate([cromosoma])`. Esto asegura consistencia 1:1 en las penalizaciones de ambos mundos.
+- **[MODIFY] `algoritmo/genetic_algorithm.py`:** Se orquestó el algoritmo con la librería oficial `from pymoo.algorithms.soo.nonconvex.ga import GA`, inyectando la matriz de clientes y la configuración a `TDVRPTWProblem`, con cruces generados mediante `OrderCrossover()` nativo de PyMoo.
+- **[MODIFY] `algoritmo/tabu_search.py`:** Se mantuvo el ciclo nativo de búsqueda tabú. Para evaluar la calidad de cada vecino, se encapsuló la llamada al simulador, inyectando el cromosoma al vector de `TDVRPTWProblem().evaluate([cromosoma])`, garantizando consistencia 1:1 en las penalizaciones entre ambos métodos.
 
 **3. Generación de Reportes**
 
-Ambos procesos dictarán los resultados usando sus mejores subproductos factibles, vaciando el flujo en `resultados/rutas/` de manera legible.
+Ambos procesos volcaron los resultados de sus mejores cromosomas factibles en `resultados/rutas/` en un formato legible.
 
 ---
 
 ### Prompt 1.2 — Solicitud de penalización por espera, salida flexible y exportación CSV
 
-**Contexto previo:** Tras las primeras ejecuciones, el equipo detectó que algunos camiones acumulaban hasta 463 minutos de espera (Vehículo 16) por tener hora de salida fija del depósito, lo que representaba una ineficiencia operacional importante.
+**Contexto previo:** Tras las primeras ejecuciones, el equipo detectó que determinados vehículos acumulaban hasta 463 minutos de espera (Vehículo 16) como consecuencia de una hora de salida fija desde el depósito, lo que evidenciaba una ineficiencia operacional significativa.
 
 **Prompt del usuario:**
 
 > Quiero implementar 3 cambios en el modelo:
->
-> 1. **Penalización por tiempo de espera**: Si un camión llega antes de que abra la ventana del cliente, ese tiempo de espera debe penalizar la función objetivo con un parámetro configurable `alpha_espera`.
-> 2. **Salida flexible desde el depósito**: En vez de forzar a todos los camiones K11 a salir exactamente a las 09:00, quiero que la hora de salida sea flexible dentro del intervalo del turno, usando una heurística JIT (Just-In-Time).
-> 3. **Exportación a CSV**: Los reportes deben dejar de generarse en `.md` y pasar a dos archivos `.csv` separados: uno de resumen de camiones y otro de detalle de paradas.
+> 1. **Penalización por tiempo de espera:** Si un camión llega antes de que abra la ventana del cliente, ese tiempo de espera debe penalizar la función objetivo con un parámetro configurable `alpha_espera`.
+> 2. **Salida flexible desde el depósito:** En vez de forzar a todos los camiones K11 a salir exactamente a las 09:00, quiero que la hora de salida sea flexible dentro del intervalo del turno, usando una heurística JIT (Just-In-Time).
+> 3. **Exportación a CSV:** Los reportes deben dejar de generarse en `.md` y pasar a dos archivos `.csv` separados: uno de resumen de camiones y otro de detalle de paradas.
 
-**Respuesta del asistente IA:**
-
-La IA generó un plan de implementación en tres partes:
+**Respuesta del asistente de IA:**
 
 **Cambio 1 — Nueva Función Objetivo con Penalización por Espera:**
 
-Redefinición matemática:
+Se redefinió la formulación matemática de la función objetivo de la siguiente manera:
 
 ```
-min: ΣΣ X_(i,t),j,k · C_ij  +  α_w · ΣΣ W_ik
+min: sum_ijk X_(i,t),j,k * C_ij  +  alpha_w * sum_ik W_ik
 ```
 
-Donde `W_ik = max(0, a_i - ts_ik)` es el tiempo de espera del camión `k` en el cliente `i`, y `α_w` es un peso de penalización configurable.
+Donde `W_ik = max(0, a_i - ts_ik)` representa el tiempo de espera del vehículo `k` en el cliente `i`, y `alpha_w` es un peso de penalización configurable.
 
-Cambios en `pymoo_problem.py`:
+Los cambios implementados en `pymoo_problem.py` consistieron en agregar el parámetro `alpha_espera` al constructor (valor por defecto: `1.0`), acumular el tiempo total de espera dentro del bucle `_evaluate` y sumarlo a `out["F"]` de la siguiente forma:
 
-- Agregar parámetro `alpha_espera` al constructor (default: `1.0`)
-- Acumular el total de espera en el bucle `_evaluate`
-- Sumar a `out["F"]`: `F = (dist_total * S) + costo_vehiculos + (alpha_espera * espera_total)`
-
-**Cambio 2 — Salida Flexible (Restricciones 10'-13'):**
-
-Las restricciones de salida fija pasan a ser desigualdades de intervalo:
-
-```
-K11: 540 ≤ ts_0,k + s_0 ≤ 900   (09:00 – 15:00)
-K12: 900 ≤ ts_0,k + s_0 ≤ 1260  (15:00 – 21:00)
-K21: 660 ≤ ts_0,k + s_0 ≤ 1020  (11:00 – 17:00)
-K22: 1020 ≤ ts_0,k + s_0 ≤ 1380 (17:00 – 23:00)
+```python
+F = (dist_total * S) + costo_vehiculos + (alpha_espera * espera_total)
 ```
 
-Implementación: Nueva función `_calcular_salida_optima(ruta_clientes, turno_intervalo)` que busca la ventana de apertura más temprana entre todos los clientes asignados al turno, resta el tiempo de viaje estimado desde el depósito hasta el primer cliente, y clampa el resultado al intervalo del turno `[lb, ub]`.
+**Cambio 2 — Salida Flexible (Restricciones 10' a 13'):**
+
+Las restricciones de salida fija se convirtieron en desigualdades de intervalo:
+
+| Turno | Intervalo |
+|-------|-----------|
+| K11 | 540 ≤ ts_0,k + s_0 ≤ 900 (09:00 – 15:00) |
+| K12 | 900 ≤ ts_0,k + s_0 ≤ 1260 (15:00 – 21:00) |
+| K21 | 660 ≤ ts_0,k + s_0 ≤ 1020 (11:00 – 17:00) |
+| K22 | 1020 ≤ ts_0,k + s_0 ≤ 1380 (17:00 – 23:00) |
+
+Se implementó la función `_calcular_salida_optima(ruta_clientes, turno_intervalo)`, que identificó la ventana de apertura más temprana entre los clientes asignados al turno, sustrajo el tiempo de viaje estimado desde el depósito hasta el primer cliente, y delimitó el resultado al intervalo `[lb, ub]` del turno correspondiente.
 
 **Cambio 3 — Exportación a dos archivos CSV:**
 
-- `gestor.py` reemplaza la generación de Markdown por la construcción de dos DataFrames de Pandas.
-- Se exportan `resumen_camiones_*.csv` y `detalle_paradas_*.csv`.
+Se reemplazó la generación de Markdown en `gestor.py` por la construcción de dos DataFrames de Pandas, exportados como `resumen_camiones_*.csv` y `detalle_paradas_*.csv`.
 
 **Archivos modificados:**
 
-| Archivo                            | Tipo de cambio                                                 |
-| ---------------------------------- | -------------------------------------------------------------- |
-| `modelo/modelo.md`               | MODIFY — Nueva F.O., restricciones 10'-13'                    |
-| `modelo/pymoo_problem.py`        | MODIFY — alpha_espera, intervalos de turno, salida óptima    |
-| `algoritmo/genetic_algorithm.py` | MODIFY — Pasar alpha_espera al constructor                    |
-| `gestion_flota/gestor.py`        | MODIFY — Reemplazar generación Markdown por DataFrames + CSV |
+| Archivo | Tipo de cambio |
+|---------|---------------|
+| `modelo/modelo.md` | MODIFY — Nueva función objetivo y restricciones 10' a 13' |
+| `modelo/pymoo_problem.py` | MODIFY — alpha_espera, intervalos de turno, salida óptima |
+| `algoritmo/genetic_algorithm.py` | MODIFY — Transmisión de alpha_espera al constructor |
+| `gestion_flota/gestor.py` | MODIFY — Reemplazo de generación Markdown por DataFrames y CSV |
 
 **Validación realizada:**
 
 ```bash
-python3 -m py_compile modelo/pymoo_problem.py  # ✅
-python3 -m py_compile algoritmo/genetic_algorithm.py  # ✅
-python3 -m py_compile gestion_flota/gestor.py  # ✅
+python3 -m py_compile modelo/pymoo_problem.py       # Sin errores
+python3 -m py_compile algoritmo/genetic_algorithm.py # Sin errores
+python3 -m py_compile gestion_flota/gestor.py        # Sin errores
 ```
 
 ---
 
 ### Resumen de lo construido en esta sesión
 
-El asistente IA generó e implementó:
+A través de esta sesión, el asistente de IA generó e implementó los siguientes componentes:
 
-1. La clase `TDVRPTWProblem` heredando de `ElementwiseProblem` (PyMoo) con vectorización mediante `tau_ij_vec()` y hard constraints configurables.
+1. La clase `TDVRPTWProblem`, heredando de `ElementwiseProblem` (PyMoo), con vectorización mediante `tau_ij_vec()` y restricciones hard configurables.
 2. La integración del GA de PyMoo con `OrderCrossover`, mutación por inversión y muestreo permutacional.
-3. La penalización por tiempo de espera en la función objetivo y la lógica de salida flexible JIT.
-4. El sistema de exportación a CSV organizado en resumen y detalle de paradas.
+3. La penalización por tiempo de espera en la función objetivo y la lógica de salida flexible JIT desde el depósito.
+4. El sistema de exportación de reportes a dos archivos CSV organizados en resumen y detalle de paradas.
 
 ---
 
@@ -153,54 +150,47 @@ El asistente IA generó e implementó:
 
 ## SECCIÓN II: ANÁLISIS DE OPERACIONES DE FLOTA — ASIGNACIÓN DINÁMICA DE TURNOS
 
-**Conversación de referencia:** *"Analyzing Fleet Management Operations"*
-**Fecha:** 13 de Abril, 2026
-**Propósito:** Eliminar la asignación forzada de turnos de mañana (K11) para entregas de tarde, implementando una selección dinámica del turno según las ventanas del primer cliente de cada ruta.
+**Conversación de referencia:** *"Analyzing Fleet Management Operations"*  
+**Fecha:** 13 de Abril, 2026  
+**Propósito:** Eliminar la asignación forzada del turno de mañana (K11) a rutas con entregas en horario vespertino, mediante la implementación de una selección dinámica del turno basada en las ventanas de tiempo del primer cliente de cada ruta.
 
 ---
 
-### Prompt 2.1 — Corrección de asignación de turno forzada
+### Prompt 2.1 — Corrección de la asignación de turno forzada
 
-**Contexto previo:** Al revisar los resultados del algoritmo genético, el equipo detectó que el sistema asignaba el turno K11 (mañana) a rutas cuyo primer cliente tenía ventanas de tiempo en la tarde (ej. 14:00 hrs). Esto generaba tiempos de espera excesivos e incoherencia operacional.
+**Contexto previo:** Al revisar los resultados del algoritmo genético, el equipo constató que el sistema asignaba el turno K11 (mañana, salida 09:00) a rutas cuyo primer cliente registraba ventanas de tiempo vespertinas (por ejemplo, 14:00 hrs), lo que generaba tiempos de espera excesivos e incoherencia con los horarios operacionales reales.
 
 **Prompt del usuario:**
 
 > El algoritmo está asignando el turno K11 (mañana, salida 09:00) a rutas que deberían pertenecer al turno de tarde (K21 o K22). El problema es que la lógica actual siempre inicia en K11 independientemente de cuándo abren los clientes. Necesito que el algoritmo determine dinámicamente el turno óptimo de inicio (K11, K12, K21, o K22) mirando la ventana de tiempo del primer cliente de cada ruta para minimizar el tiempo ocioso y que la asignación sea coherente con los horarios reales de entrega.
 
-**Respuesta del asistente IA:**
+**Respuesta del asistente de IA:**
 
-La IA analizó el código e identificó que en `pymoo_problem.py` la lógica de evaluación siempre iniciaba asignando el primer turno disponible de forma secuencial sin considerar cuándo debía atenderse el primer cliente. La solución propuesta fue:e
-
-**Heurística de Selección Dinámica de Turno:**
+El asistente identificó que en `pymoo_problem.py` la evaluación asignaba siempre el primer turno disponible de forma secuencial, sin considerar el horario de atención del primer cliente. La solución propuesta consistió en la siguiente heurística de selección dinámica:
 
 ```python
 def _seleccionar_turno_inicial(self, primer_cliente_ventana_apertura):
     """
     Selecciona el turno de despacho más adecuado en función de
     la ventana de apertura del primer cliente de la ruta.
-  
-    Retorna el índice de plantilla de turno (turno_tipo, ruta_idx)
-    que minimiza el tiempo de espera del camión al llegar.
+    Retorna (turno_tipo, ruta_idx) que minimiza el tiempo de espera.
     """
     mejor_turno = None
     menor_espera = float('inf')
-  
+
     for tipo_idx, rutas in enumerate(self.plantillas_turnos):
         for ruta_idx, (lb, ub) in enumerate(rutas):
-            # Tiempo de salida óptimo dentro del intervalo
             t_salida = max(lb, primer_cliente_ventana_apertura - t_viaje_estimado)
             t_salida = min(t_salida, ub)
             espera = max(0, primer_cliente_ventana_apertura - (t_salida + t_viaje_estimado))
             if espera < menor_espera:
                 menor_espera = espera
                 mejor_turno = (tipo_idx, ruta_idx)
-  
+
     return mejor_turno
 ```
 
-**Resultado:** La lógica de evaluación ahora selecciona dinámicamente el turno que minimiza el tiempo de espera inicial, asignando automáticamente turnos de tarde (K21/K22) a rutas con clientes vespertinos.
-
-**Archivos modificados:** `modelo/pymoo_problem.py`, `algoritmo/genetic_algorithm.py`
+Con este cambio, la lógica de evaluación seleccionó dinámicamente el turno que minimizó el tiempo de espera inicial, asignando de forma automática los turnos vespertinos (K21/K22) a las rutas cuyos clientes operaban en horario de tarde.
 
 ---
 
@@ -208,73 +198,66 @@ def _seleccionar_turno_inicial(self, primer_cliente_ventana_apertura):
 
 ## SECCIÓN III: OPTIMIZACIÓN HÍBRIDA Y PARALELIZACIÓN
 
-**Conversación de referencia:** *"Hybrid Optimization And Parallelization"*
-**Fecha:** Abril 2026
-**Propósito:** Migrar de un Algoritmo Genético puro (población aleatoria) a un paradigma híbrido que usa el Algoritmo de Ahorros de Clarke-Wright como solución semilla, y paralelizar la optimización de clústeres usando multi-procesamiento.
+**Conversación de referencia:** *"Hybrid Optimization And Parallelization"*  
+**Fecha:** Abril 2026  
+**Propósito:** Migrar de un Algoritmo Genético con población completamente aleatoria a un paradigma híbrido que utilizara la solución del Algoritmo de Ahorros de Clarke-Wright como semilla inicial, y paralelizar la optimización de clústeres mediante multiprocesamiento.
 
 ---
 
-### Prompt 3.1 — Implementación del paradigma híbrido Savings + GA
+### Prompt 3.1 — Implementación del paradigma híbrido Savings + GA con paralelización
 
-**Contexto previo:** El equipo observó que el Algoritmo Genético, al partir de poblaciones completamente aleatorias, tardaba demasiado en converger y en ocasiones no encontraba soluciones factibles. Se buscaba una estrategia constructiva que sirviera como punto de partida de alta calidad.
+**Contexto previo:** El equipo observó que el Algoritmo Genético, al partir de poblaciones completamente aleatorias, exhibía tiempos de convergencia elevados y en ocasiones no encontraba soluciones factibles dentro del número de generaciones configurado. Se buscaba una estrategia constructiva que proporcionara un punto de partida de mayor calidad.
 
 **Prompt del usuario:**
 
 > Quiero mejorar el rendimiento del GA implementando un paradigma híbrido de dos fases:
+> 1. **Fase Constructiva:** Implementar el Algoritmo de Ahorros de Clarke-Wright adaptado al TDVRPTW que genere una solución inicial factible respetando capacidades de peso, volumen y duración máxima de ruta.
+> 2. **Fase de Mejora:** Usar esa solución como la "semilla" (primer individuo) de la población inicial del GA.
+> 3. **Paralelización:** Reemplazar el bucle secuencial de clústeres por procesamiento paralelo usando todos los cores disponibles de la CPU con `concurrent.futures.ProcessPoolExecutor`.
 >
-> 1. **Fase Constructiva**: Implementar el Algoritmo de Ahorros de Clarke-Wright adaptado al TDVRPTW que genere una solución inicial factible respetando capacidades de peso, volumen y duración máxima de ruta.
-> 2. **Fase de Mejora**: Usar esa solución como la "semilla" (primer individuo) de la población inicial del GA.
-> 3. **Paralelización**: Reemplazar el bucle secuencial de clústeres por procesamiento paralelo usando todos los cores disponibles de la CPU.
->
-> Para el algoritmo de ahorros, calcula `s(i,j) = d(depot,i) + d(depot,j) - d(i,j)` para todo par de clientes. Ordena descendente y fusiona rutas respetando capacidades.
+> Para el algoritmo de ahorros, calcula `s(i,j) = d(depot,i) + d(depot,j) - d(i,j)` para todo par de clientes, ordena descendente y fusiona rutas respetando capacidades.
 
-**Respuesta del asistente IA:**
+**Respuesta del asistente de IA:**
 
-La IA propuso e implementó el siguiente plan, con dos preguntas de revisión importantes:
+Antes de proceder con la implementación, el asistente planteó dos consideraciones para revisión del equipo:
 
-> ⚠️ **Revisión requerida — Hard constraints en savings**: El Algoritmo de Ahorros (Clarke-Wright) producirá una solución constructiva que respeta las restricciones de capacidad y duración máxima de ruta. Las ventanas de tiempo se verifican pero NO se validan como hard-constraint en la fase de savings (eso lo maneja el GA posterior). ¿Es aceptable este enfoque?
->
-> ⚠️ **Revisión requerida — Workers**: Para la paralelización se usará `concurrent.futures.ProcessPoolExecutor`. La cantidad de workers será `os.cpu_count()` (todos los cores disponibles). ¿Deseas limitar la cantidad máxima de workers?
+> **Punto de revisión requerido:** El Algoritmo de Ahorros producirá una solución constructiva que respeta las restricciones de capacidad y duración máxima de ruta. Las ventanas de tiempo se verificarán pero no se validarán como hard-constraint en la fase de savings; esa responsabilidad recae sobre el GA en la fase posterior. ¿Es aceptable este enfoque?
 
-**Módulos propuestos e implementados:**
+> **Punto de revisión requerido:** Para la paralelización se empleará `ProcessPoolExecutor` (multiprocesamiento real, independiente del GIL de Python). La cantidad de workers será `os.cpu_count()` (todos los núcleos disponibles). ¿Se requiere limitar la cantidad máxima de workers?
 
-**`algoritmo/savings.py` (NUEVO):**
+Una vez confirmados estos puntos por el equipo, se implementaron los siguientes módulos:
+
+**`algoritmo/savings.py` (NUEVO) — Clarke-Wright adaptado al TDVRPTW:**
 
 ```python
-def clarke_wright_savings(df_cluster, matriz_dist, depot_id, 
+def clarke_wright_savings(df_cluster, matriz_dist, depot_id,
                           cap_vol_cm3, cap_peso_g, d_max_min):
     """
     Algoritmo de Ahorros de Clarke-Wright adaptado al TDVRPTW.
-  
-    1. Calcula matriz de ahorros: s(i,j) = d(depot,i) + d(depot,j) - d(i,j)
-    2. Ordena pares por savings descendente
-    3. Fusiona rutas iterativamente respetando:
+
+    1. Calcula la matriz de savings: s(i,j) = d(depot,i) + d(depot,j) - d(i,j)
+    2. Ordena los pares por savings en orden descendente
+    3. Fusiona rutas de forma iterativa, respetando:
        - Capacidad de volumen (cap_vol_cm3)
        - Capacidad de peso (cap_peso_g)
        - Duración máxima de ruta (d_max_min)
        - Solo fusiona extremos de ruta (primer o último cliente)
-    4. Retorna lista de rutas convertida en permutación para el GA
+    4. Retorna la permutación resultante para ser inyectada al GA
     """
 ```
 
-**`algoritmo/genetic_algorithm.py` (MODIFICADO):**
+**`algoritmo/genetic_algorithm.py` — Muestreo con semilla del algoritmo de ahorros:**
 
 ```python
 class SavingsSeededSampling(Sampling):
-    """
-    Muestreo personalizado para PyMoo que inyecta la solución
-    del algoritmo de ahorros como primer individuo de la población.
-    """
     def __init__(self, savings_permutation):
         super().__init__()
         self.savings_perm = savings_permutation
-  
+
     def _do(self, problem, n_samples, **kwargs):
         X = np.full((n_samples, problem.n_var), 0, dtype=int)
-        # Primer individuo: solución de savings
-        X[0] = self.savings_perm
-        # Resto: permutaciones aleatorias
-        for i in range(1, n_samples):
+        X[0] = self.savings_perm       # Primer individuo: solución del algoritmo de ahorros
+        for i in range(1, n_samples):  # Individuos restantes: permutaciones aleatorias
             X[i] = np.random.permutation(problem.n_var)
         return X
 
@@ -285,26 +268,25 @@ with ProcessPoolExecutor(max_workers=os.cpu_count()) as executor:
         for cluster_id, df_c in clusters.items()
     }
     for future in as_completed(futures):
-        resultado = future.result()
-        resultados.append(resultado)
+        resultados.append(future.result())
 ```
 
-**Resultados verificados en prueba (muestra 20 pedidos):**
+**Resultados verificados en prueba (muestra de 20 pedidos):**
 
-| KPI                     | Valor      |
-| ----------------------- | ---------- |
-| Función Objetivo Total | 211,433.41 |
-| % Entregas a Tiempo     | 100.0%     |
-| Distancia Total         | 224.53 km  |
-| Vehículos Usados       | 4          |
+| KPI | Valor |
+|-----|-------|
+| Función Objetivo Total | 211.433,41 |
+| Porcentaje de Entregas a Tiempo | 100,0% |
+| Distancia Total | 224,53 km |
+| Vehículos Utilizados | 4 |
 
-**Archivos creados/modificados:**
+**Archivos creados o modificados:**
 
-| Archivo                            | Acción                                          |
-| ---------------------------------- | ------------------------------------------------ |
-| `algoritmo/savings.py`           | NUEVO — Implementación Clarke-Wright           |
-| `algoritmo/genetic_algorithm.py` | MODIFICADO — Semilla savings + paralelismo      |
-| `PIPELINE_GLOBAL.md`             | MODIFICADO — Documentación del nuevo paradigma |
+| Archivo | Acción |
+|---------|--------|
+| `algoritmo/savings.py` | NUEVO — Implementación Clarke-Wright |
+| `algoritmo/genetic_algorithm.py` | MODIFICADO — Semilla savings y paralelismo multi-núcleo |
+| `PIPELINE_GLOBAL.md` | MODIFICADO — Documentación del nuevo paradigma |
 
 ---
 
@@ -312,133 +294,127 @@ with ProcessPoolExecutor(max_workers=os.cpu_count()) as executor:
 
 ## SECCIÓN IV: RELAJACIÓN DE RESTRICCIONES DE VENTANA DE TIEMPO
 
-**Conversación de referencia:** *"Relaxing Time Window Constraints"*
-**Fecha:** 8 de Abril, 2026
-**Propósito:** Implementar una tolerancia de 30 minutos en el cierre de las ventanas de tiempo de los clientes, y luego migrar de restricción de "tiempo de conducción" a "duración total del turno" para evitar el problema de Shift Spanning.
+**Conversación de referencia:** *"Relaxing Time Window Constraints"*  
+**Fecha:** 8 de Abril, 2026  
+**Propósito:** Implementar una tolerancia de 30 minutos en el cierre de las ventanas de tiempo de los clientes, y corregir el problema de Shift Spanning mediante la transición de una restricción de tiempo de conducción a una de duración total del turno.
 
 ---
 
-### Prompt 4.1 — Relajación de 30 minutos en ventanas de tiempo
+### Prompt 4.1 — Relajación de 30 minutos en las ventanas de tiempo
 
-**Contexto previo:** Al ejecutar el algoritmo con los datos reales, se observaba que muchas entregas eran marcadas como violaciones de ventana por llegar pocos minutos tarde (1-10 minutos). El equipo consideró que una tolerancia de 30 minutos era operacionalmente razonable.
+**Contexto previo:** Durante las ejecuciones del algoritmo con datos reales, se observó que numerosas entregas eran registradas como violaciones de ventana de tiempo por márgenes reducidos (entre 1 y 10 minutos). El equipo concluyó que una tolerancia de 30 minutos resultaba operacionalmente razonable y consistente con los márgenes habituales de operación logística.
 
 **Prompt del usuario:**
 
 > Necesito relajar las ventanas de tiempo de los clientes en 30 minutos adicionales en el cierre. Es decir, si la ventana de un cliente es [09:00, 10:00], ahora se debe considerar como [09:00, 10:30]. Esto debe:
->
 > 1. Actualizarse en la documentación del modelo (`modelo.md`) en la Restricción 7
 > 2. Implementarse en el evaluador `pymoo_problem.py` modificando el cálculo de `t_violacion`
 > 3. Reflejarse en el reporte de diagnóstico de `genetic_algorithm.py` mostrando claramente la ventana relajada
 
-**Respuesta del asistente IA:**
+**Respuesta del asistente de IA:**
 
-**Cambios implementados:**
+**`modelo/modelo.md` — Restricción 7 actualizada:**
 
-**1. `modelo/modelo.md` — Restricción 7 actualizada:**
-La documentación matemática ahora refleja explícitamente el término `+ 30` en el límite superior de la ventana:
+La documentación matemática fue modificada para incluir explícitamente el término de tolerancia:
 
 ```
-Restricción 7: ts_ik + s_i ≤ b_i + 30  ∀ i ∈ I, k ∈ K
+Restricción 7: ts_ik + s_i <= b_i + 30    para todo i en I, k en K
 ```
 
-**2. `modelo/pymoo_problem.py` — Evaluación con tolerancia:**
+**`modelo/pymoo_problem.py` — Evaluación con tolerancia de 30 minutos:**
 
 ```python
-# ANTES
+# Antes de la modificación
 if t_inicio_servicio > b_p:
     t_violacion = t_inicio_servicio - b_p
 
-# DESPUÉS
+# Después de la modificación
 if t_inicio_servicio > (b_p + 30.0):
     t_violacion = t_inicio_servicio - (b_p + 30.0)
 ```
 
-Adicionalmente, el diccionario `detalle_nodos` ahora incluye la clave `b_ventana_relaxed` para trazabilidad (`b_ventana_relaxed = b_p + 30.0`).
+El diccionario `detalle_nodos` fue enriquecido con la clave `b_ventana_relaxed = b_p + 30.0` para mantener la trazabilidad de la relajación en los reportes.
 
-**3. `algoritmo/genetic_algorithm.py` — Diagnóstico mejorado:**
+**`algoritmo/genetic_algorithm.py` — Diagnóstico mejorado:**
 
 ```python
-# ANTES
+# Antes de la modificación
 print(f"        - {nid}: Servicio a las {h_lleg} | Cierre ventana: {h_cierre} | Exceso: {viola:.0f} min")
 
-# DESPUÉS
+# Después de la modificación
 print(f"        - {nid}: Servicio a las {h_lleg} | Cierre (+30m): {h_cierre_rel} | Exceso: {viola:.0f} min")
 ```
 
 ---
 
-### Prompt 4.2 — Corrección del problema de Shift Spanning (turno que se extiende)
+### Prompt 4.2 — Corrección del problema de Shift Spanning
 
-**Contexto previo:** Tras las ejecuciones iniciales, el equipo detectó un comportamiento anómalo: camiones clasificados como K11 (mañana) realizaban entregas vespertinas porque la restricción solo medía tiempo de conducción (trayecto A→B) y no incluía tiempos de espera. Un camión podía salir a las 09:00, esperar 5 horas frente a un cliente, atenderlo en la tarde y seguir siendo K11.
+**Contexto previo:** El equipo detectó un comportamiento no deseado denominado internamente "shift spanning": vehículos clasificados como K11 (turno de mañana) realizaban entregas en horario vespertino, debido a que la restricción de control únicamente medía el tiempo de conducción (desplazamiento entre nodos) y excluía los períodos de espera frente a los clientes.
 
 **Prompt del usuario:**
 
 > El algoritmo tiene un problema que llamo "shift spanning": un camión de turno K11 (09:00) puede estar esperando fuera de un cliente hasta las 15:00 y el sistema lo sigue catalogando como K11 porque solo mide el tiempo de conducción, no el tiempo total del turno.
 >
-> Necesito cambiar la restricción de control de duración de "tiempo máximo de conducción" a "duración máxima del turno completo" (incluyendo tiempos de espera). Si duración total (desde salida hasta regreso estimado al depósito) > 5 horas (300 min), el camión debe cerrar esa ruta y comenzar una nueva con el siguiente turno disponible.
+> Necesito cambiar la restricción de control de duración de "tiempo máximo de conducción" a "duración máxima del turno completo" (incluyendo tiempos de espera). Si la duración total (desde la salida hasta el regreso estimado al depósito) supera los 300 minutos (5 horas), el vehículo debe cerrar esa ruta y comenzar una nueva con el siguiente turno disponible.
 
-**Respuesta del asistente IA:**
+**Respuesta del asistente de IA:**
 
-**Diagnóstico del problema:**
+El asistente explicó la causa raíz del comportamiento:
 
-> En `pymoo_problem.py`, la condición que fuerza a un camión a regresar al depósito y "cerrar" su ruta K11 es:
-> `if (vol_actual + vol_p > self.cap_vol_cm3) o (tiempo_conduccion_estimado > self.d_max_min):`
->
-> El problema es que `tiempo_conduccion_estimado` **solo suma los tiempos de viaje (viajar de A a B)**. Un camión puede salir a las 09:00, viajar 10 minutos, quedarse esperando 5 horas parado afuera de un cliente de la tarde, atenderlo, y volver a las 15:00. Para el código de ese entonces, ese camión solo "trabajó/condujo" 20 minutos, así que no rompe la regla de los 300 minutos y el algoritmo lo sigue catalogando bajo su etiqueta original: K11.
+> En `pymoo_problem.py`, la condición de control emplea `tiempo_conduccion_estimado`, que acumula exclusivamente los tiempos de desplazamiento entre nodos. Un vehículo puede salir a las 09:00, desplazarse 10 minutos hasta la zona de entrega, permanecer en espera durante 5 horas hasta que abra la ventana del cliente, atenderlo y regresar al depósito a las 15:00. Para la lógica de ese momento, dicho vehículo solo había "conducido" 20 minutos, lo que no superaba el umbral de 300 minutos, y el sistema lo continuaba clasificando como K11.
 
-**Cambio propuesto en `pymoo_problem.py`:**
+**Cambio implementado en `pymoo_problem.py`:**
 
 ```python
-# ANTES: Solo mide tiempo de conducción
+# Antes: solo medía el tiempo de conducción
 if (vol_actual + vol_p > self.cap_vol_cm3) or \
    (tiempo_conduccion_estimado > self.d_max_min):
-    # cierra ruta y abre nueva
+    # se cerraba la ruta y se abría una nueva
 
-# DESPUÉS: Mide duración total del turno
+# Después: mide la duración total del turno (incluyendo esperas)
 t_retorno_estimado = t_fin_tent + t_viaj_ret_tent
 duracion_turno_estimada = t_retorno_estimado - cam_t_salida
 
 if (vol_actual + vol_p > self.cap_vol) or \
    (duracion_turno_estimada > self.d_max_min):
-    # cierra ruta y abre nueva
+    # se cierra la ruta y se abre una nueva
 ```
 
-**Impacto documentado en `modelo.md` — Restricción 14:**
+**Actualización en `modelo.md` — Restricción 14:**
 
-La restricción matemática se actualizó para reflejar que la diferencia entre la salida del depósito y el retorno estimado (incluyendo esperas) debe ser ≤ `d_max`:
+La restricción fue reformulada para expresar que la diferencia entre el momento de regreso al depósito (incluyendo esperas) y la hora de salida no puede superar `d_max`:
 
 ```
-Restricción 14 (actualizada): 
-ts_fin_k - ts_inicio_k ≤ d_max   ∀ k ∈ K
-(donde ts_fin_k incluye el tiempo de regreso al depósito)
+Restricción 14 (actualizada):
+ts_fin_k - ts_inicio_k <= d_max    para todo k en K
+(donde ts_fin_k incorpora el tiempo de regreso al depósito con esperas acumuladas)
 ```
 
-**Aviso importante planteado por la IA:**
+El asistente advirtió proactivamente sobre el impacto del cambio:
 
-> ⚠️ Si la ventana máxima de un turno (ej. `d_max_min` = 300 min / 5 horas) se vuelve estricta, el algoritmo creará rutas más fragmentadas y utilizará más saltos a "K12" u otros camiones, ya que la espera cuenta como tiempo del turno. ¿Te parece correcto que limitaremos toda la duración de la salida a 300 minutos?
+> Si el umbral `d_max_min` = 300 minutos se aplica de forma estricta sobre la duración total del turno, el algoritmo generará rutas más fragmentadas y realizará un mayor número de asignaciones al turno K12 u otros turnos, dado que los períodos de espera ahora se contabilizan como tiempo activo del turno. Se requiere confirmar que este comportamiento es el deseado.
 
-El equipo confirmó que esto era correcto y alineado con la realidad operacional.
+El equipo confirmó que dicho comportamiento era correcto y se encontraba alineado con la realidad operacional de la empresa.
 
 ---
 
 ---
 
-## SECCIÓN V: SCRAPING DE DATOS — PORTAL INMOBILIARIO (BODEGAS)
+## SECCIÓN V: EXTRACCIÓN DE DATOS — PORTAL INMOBILIARIO (BODEGAS)
 
-**Conversación de referencia:** *"Scraping Portal Inmobiliario Data"*
-**Fecha:** Abril 2026
-**Propósito:** Extraer datos de bodegas en venta en la Región Metropolitana desde Portal Inmobiliario para su análisis como potenciales centros de distribución. Este es un caso de uso de IA para **tratamiento de datos**.
+**Conversación de referencia:** *"Scraping Portal Inmobiliario Data"*  
+**Fecha:** Abril 2026  
+**Propósito:** Extraer datos de bodegas en venta en la Región Metropolitana desde Portal Inmobiliario para su análisis como potenciales centros de distribución. Uso de IA bajo la modalidad de tratamiento de datos.
 
 ---
 
 ### Prompt 5.1 — Desarrollo del scraper con Playwright
 
-**Contexto previo:** El equipo necesitaba recopilar información georreferenciada de bodegas disponibles en la RM para alimentar el análisis de ubicación del centro de distribución. Los métodos directos (requests/BeautifulSoup) fueron bloqueados por el sistema anti-bot del portal.
+**Contexto previo:** El equipo requería recopilar información georreferenciada de bodegas disponibles en la Región Metropolitana para alimentar el análisis de ubicación del centro de distribución. Las solicitudes directas mediante las bibliotecas `requests` y `BeautifulSoup` fueron bloqueadas por el sistema anti-bot del portal.
 
 **Prompt del usuario:**
 
 > Necesito un scraper para Portal Inmobiliario que extraiga información de bodegas en venta en la Región Metropolitana. El scraper debe:
->
 > 1. Usar Playwright con Chromium para evitar bloqueos anti-bot
 > 2. Navegar a la URL de búsqueda de bodegas
 > 3. Identificar y visitar uno por uno cada enlace de bodega listado
@@ -447,104 +423,85 @@ El equipo confirmó que esto era correcto y alineado con la realidad operacional
 >
 > Crea un entorno virtual en `/home/dacmxo/Desktop/udd/bodega/` e instala las dependencias necesarias.
 
-**Respuesta del asistente IA:**
+**Respuesta del asistente de IA:**
 
-La IA propuso el siguiente plan y ejecutó la implementación:
-
-**Entorno y Dependencias:**
+Se creó el entorno virtual y se instalaron las dependencias requeridas mediante los siguientes comandos:
 
 ```bash
-# Crear entorno virtual
 python3 -m venv /home/dacmxo/Desktop/udd/bodega/venv
-
-# Instalar dependencias
 ./venv/bin/pip install playwright pandas
-
-# Instalar navegador Chromium
 ./venv/bin/playwright install chromium
 ```
 
-**Script `scraper.py` generado:**
+El script `scraper.py` generado implementó los siguientes pasos:
 
-El script implementa:
+1. Apertura de un navegador Chromium en modo headless mediante Playwright, con el objeto de eludir los sistemas de detección anti-bot del portal.
+2. Navegación a la URL de búsqueda de bodegas en Portal Inmobiliario.
+3. Identificación de todos los enlaces individuales de bodegas presentes en la página de resultados.
+4. Visita secuencial de cada enlace, extrayendo los campos: ID, Dirección, Precio de venta, Superficie y Coordenadas.
+5. Almacenamiento progresivo de los registros en el archivo `bodegas_rm.csv` mediante la biblioteca Pandas.
 
-1. Apertura de navegador Chromium en modo headless con Playwright
-2. Navegación a la URL de búsqueda de Portal Inmobiliario
-3. Identificación de todos los links individuales de bodegas listadas
-4. Visita secuencial de cada enlace para extraer: ID, Dirección, Precio, Superficie, Coordenadas
-5. Almacenamiento progresivo en `bodegas_rm.csv` via pandas
-
-**Desafío encontrado:** Portal Inmobiliario oculta las coordenadas exactas y entrega puntos predeterminados (coordenadas centroidales de la dirección, no exactas).
-
-**Solución implementada por la IA:** Se creó un script adicional `process_geocoder.py` que:
-
-- Lee cada dirección extraída del CSV
-- La pasa al motor de geocodificación de ArcGIS (via `geocode_orders` de `Captone-Analytics/grafo/geocoder.py`)
-- Reasigna las coordenadas reales georeferenciadas
-- Agrega una columna nueva de `Comuna` parseada desde la dirección
+Durante la ejecución del scraper, el asistente identificó el siguiente problema técnico: Portal Inmobiliario no expone las coordenadas exactas de las propiedades, sino que entrega puntos centroidales predeterminados correspondientes a la dirección registrada, los cuales no representan la ubicación precisa del inmueble.
 
 ---
 
-### Prompt 5.2 — Geocodificación y enriquecimiento del dataset
+### Prompt 5.2 — Geocodificación y enriquecimiento del conjunto de datos
 
 **Prompt del usuario:**
 
 > Las coordenadas que extrae el scraper son centroidales (Portal Inmobiliario las oculta). Necesitas usar el geocoder que ya tenemos en el proyecto (`Captone-Analytics/grafo/geocoder.py`) para geocodificar cada una de las 230 direcciones extraídas y reemplazar las coordenadas del CSV con las coordenadas reales. También agrega una columna de "Comuna" parseada de la dirección.
 
-**Respuesta del asistente IA:**
-
-La IA generó el script `process_geocoder.py`:
+**Respuesta del asistente de IA — Script `process_geocoder.py` generado:**
 
 ```python
-from Captone-Analytics.grafo.geocoder import geocode_orders
+from grafo.geocoder import geocode_orders
 import pandas as pd
 
 df = pd.read_csv('bodegas_rm.csv')
 
-# Eliminar coordenadas centroidales inaccuradas
+# Se eliminan las coordenadas centroidales inexactas
 df = df.drop(columns=['lat', 'lon'], errors='ignore')
 
-# Geocodificar con ArcGIS via geocoder del proyecto
+# Se geocodifican las direcciones mediante el motor ArcGIS del proyecto
 coords = geocode_orders(df['direccion'].tolist())
 df['lat'] = [c['lat'] for c in coords]
 df['lon'] = [c['lon'] for c in coords]
 
-# Extraer comuna de la cadena de dirección
+# Se extrae la comuna a partir de la cadena de dirección
 df['comuna'] = df['direccion'].str.extract(r',\s*([^,]+),\s*Región')
 
 df.to_csv('bodegas_rm_geocoded.csv', index=False)
 ```
 
-**Resultado final:** Dataset `bodegas_rm_geocoded.csv` con 230 registros de bodegas, cada uno con coordenadas geocodificadas reales y columna de comuna identificada.
+Como resultado, se obtuvo el archivo `bodegas_rm_geocoded.csv`, que contiene los 230 registros de bodegas con coordenadas geocodificadas mediante el motor de ArcGIS y una columna explícita de comuna.
 
-**Archivos entregados:**
+**Archivos entregados al término de la sesión:**
 
-| Archivo                     | Descripción                                           |
-| --------------------------- | ------------------------------------------------------ |
-| `bodegas_rm.csv`          | Tabla original extraída (230 bodegas)                 |
-| `process_geocoder.py`     | Script de geocodificación y extracción de comuna     |
-| `bodegas_rm_geocoded.csv` | ⭐ Tabla final con coordenadas reales y columna comuna |
-
----
+| Archivo | Descripción |
+|---------|-------------|
+| `bodegas_rm.csv` | Tabla original extraída del portal (230 bodegas) |
+| `process_geocoder.py` | Script de geocodificación y extracción de comuna |
+| `bodegas_rm_geocoded.csv` | Tabla final con coordenadas geocodificadas reales y columna de comuna |
 
 ---
 
-## SECCIÓN VI: SCRAPING DE VEHÍCULOS COMERCIALES — CHILEAUTOS
+---
 
-**Conversación de referencia:** *"Scraping ChileAutos Commercial Vehicles"*
-**Fecha:** Abril 2026
-**Propósito:** Extraer datos de furgones y vehículos comerciales desde ChileAutos para alimentar el análisis de flota disponible en el mercado chileno. Este es otro caso de uso de IA para **tratamiento de datos**.
+## SECCIÓN VI: EXTRACCIÓN DE DATOS — VEHÍCULOS COMERCIALES EN CHILEAUTOS
+
+**Conversación de referencia:** *"Scraping ChileAutos Commercial Vehicles"*  
+**Fecha:** Abril 2026  
+**Propósito:** Extraer datos de furgones y vehículos comerciales desde ChileAutos para parametrizar el modelo de flota con información de mercado. Uso de IA bajo la modalidad de tratamiento de datos.
 
 ---
 
-### Prompt 6.1 — Intento de scraping de furgones en ChileAutos
+### Prompt 6.1 — Intento de extracción de datos de furgones en ChileAutos
 
-**Contexto previo:** El equipo necesitaba recopilar información sobre furgones comerciales disponibles en el mercado chileno (marca, modelo, precio, capacidad en kg, capacidad volumétrica, rendimiento de combustible) para parametrizar el modelo de flota.
+**Contexto previo:** El equipo requería recopilar información sobre furgones comerciales disponibles en el mercado chileno para parametrizar el modelo de flota del proyecto.
 
 **Prompt del usuario:**
 
 > Quiero desarrollar un scraper para ChileAutos que extraiga datos de furgones comerciales. La URL base es `https://www.chileautos.cl/vehiculos/autos-vehículo/furgón-categoria/`. Los campos que necesito extraer son:
->
 > - Modelo y Marca
 > - Tipo de vehículo
 > - Precio
@@ -553,70 +510,69 @@ df.to_csv('bodegas_rm_geocoded.csv', index=False)
 >
 > Navega a la página, identifica la estructura de las tarjetas de listado, cuenta los resultados por página e identifica el mecanismo de paginación para extraer todos los resultados.
 
-**Respuesta del asistente IA:**
+**Respuesta del asistente de IA:**
 
-El asistente intentó navegar a ChileAutos con el agente de navegador, pero encontró un error técnico irrecuperable:
+El asistente inició la navegación hacia ChileAutos, pero encontró un error técnico irrecuperable en la infraestructura del entorno de ejecución:
 
-> **ERROR CRÍTICO:** El sistema reportó `open_browser_url failed` con error: `failed to create browser context: failed to create browser instance: wrong CDP URL: invalid CDP URL`
+> **Error reportado:** El sistema informó que `open_browser_url` falló con el siguiente mensaje:
+> `failed to create browser context: failed to create browser instance: wrong CDP URL: invalid CDP URL`
 >
-> Este error persiste para cualquier URL (incluyendo google.com). Se trata de un problema de infraestructura del entorno de ejecución (CDP — Chrome DevTools Protocol) que está fuera del control del script de scraping.
+> El error se reprodujo de forma persistente para cualquier URL intentada, incluyendo sitios de acceso público general. El origen del problema se identificó como una falla en la configuración del protocolo CDP (Chrome DevTools Protocol) del entorno, la cual se encontraba fuera del alcance del script de extracción.
 
-**Checklist de intentos realizados:**
+**Registro de intentos realizados:**
 
-| Paso                                     | Estado       |
-| ---------------------------------------- | ------------ |
-| Navegar a ChileAutos listings (furgones) | ❌ FALLIDO   |
-| Esperar carga de página (10s+)          | No alcanzado |
-| Capturar screenshot y DOM                | No alcanzado |
-| Analizar estructura de tarjetas          | No alcanzado |
-| Identificar mecanismo de paginación     | No alcanzado |
+| Paso | Estado | Observación |
+|------|--------|-------------|
+| Navegar a la página de furgones en ChileAutos | No completado | Error CDP irrecuperable |
+| Esperar carga completa de la página | No alcanzado | — |
+| Capturar screenshot y estructura DOM | No alcanzado | — |
+| Analizar estructura de tarjetas de listado | No alcanzado | — |
+| Identificar mecanismo de paginación | No alcanzado | — |
 
 **Nota sobre esta sesión:**
 
-Debido a fallas en la infraestructura del navegador (error CDP), el scraping de ChileAutos no pudo completarse de forma automatizada en esta sesión. El equipo debió recopilar la información de vehículos comerciales mediante revisión manual del sitio web o fuentes alternativas.
+Debido a la falla en la infraestructura del navegador, el proceso de extracción automatizada de datos desde ChileAutos no pudo ser completado en esta sesión. El equipo debió recurrir a la recopilación manual de la información sobre vehículos comerciales, o bien a fuentes de datos alternativas.
 
-Esta limitación fue identificada, registrada e informada inmediatamente al equipo, cumpliendo con el estándar de transparencia sobre los alcances y errores de la herramienta IA, conforme al marco académico establecido: *"Recuerde que estas aplicaciones cometen errores, y pueden entregar código que no opera como ustedes quieren. Debe verificar que el código efectivamente hace lo pedido."*
-
----
+La limitación fue identificada, registrada e informada de inmediato al equipo. Este caso ilustra de forma concreta la advertencia contemplada en el marco académico del proyecto: *"estas aplicaciones cometen errores y pueden entregar código que no opera como ustedes quieren; debe verificar que el código efectivamente hace lo pedido"*. La herramienta de IA no ocultó el error ni intentó presentar un resultado parcial como válido, sino que lo declaró explícitamente para que el equipo tomara las decisiones pertinentes.
 
 ---
 
-## RESUMEN CONSOLIDADO DEL USO DE IA EN EL PROYECTO
+---
 
-### Por tipo de uso
+## RESUMEN CONSOLIDADO DEL USO DE INTELIGENCIA ARTIFICIAL EN EL PROYECTO
 
-| Uso                              | Conversaciones       | Archivos generados                                                                                                                       |
-| -------------------------------- | -------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
-| **Generación de código** | Secs. I, II, III, IV | `pymoo_problem.py`, `savings.py`, `genetic_algorithm.py` (modificado), `gestor.py` (modificado), `tabu_search.py` (modificado) |
-| **Tratamiento de datos**   | Secs. V, VI          | `scraper.py`, `process_geocoder.py`, `bodegas_rm_geocoded.csv`                                                                     |
+### Clasificación por tipo de uso según el marco académico
 
-### Archivos de código generados con asistencia de IA
+| Tipo de uso | Secciones | Descripción |
+|------------|-----------|-------------|
+| Generación de código | I, II, III, IV | El equipo definió las especificaciones; la IA generó la implementación técnica |
+| Tratamiento de datos | V, VI | Extracción, limpieza y geocodificación de datos de mercado |
 
-| Archivo                            | Descripción                                                                         | Conversación  |
-| ---------------------------------- | ------------------------------------------------------------------------------------ | -------------- |
-| `modelo/pymoo_problem.py`        | Evaluador TDVRPTW con PyMoo, hard constraints, salida flexible, penalización espera | Sec. I, II, IV |
-| `algoritmo/savings.py`           | Algoritmo de Ahorros Clarke-Wright adaptado al TDVRPTW                               | Sec. III       |
-| `algoritmo/genetic_algorithm.py` | GA con semilla savings, paralelización multi-core, diagnóstico mejorado            | Sec. I, III    |
-| `algoritmo/tabu_search.py`       | Búsqueda tabú con evaluación centralizada PyMoo                                   | Sec. I         |
-| `gestion_flota/gestor.py`        | Gestor de flota con exportación a CSV doble                                         | Sec. I         |
-| `bodega/scraper.py`              | Scraper Playwright para Portal Inmobiliario                                          | Sec. V         |
-| `bodega/process_geocoder.py`     | Geocodificación vía ArcGIS + extracción de comuna                                 | Sec. V         |
+### Inventario de archivos de código generados con asistencia de IA
 
-### Validaciones realizadas por el equipo
+| Archivo | Descripción | Sección |
+|---------|-------------|---------|
+| `modelo/pymoo_problem.py` | Evaluador TDVRPTW con PyMoo, restricciones hard, salida flexible JIT y penalización por espera | I, II, IV |
+| `algoritmo/savings.py` | Algoritmo de Ahorros de Clarke-Wright adaptado al TDVRPTW | III |
+| `algoritmo/genetic_algorithm.py` | GA con semilla savings, paralelización multi-núcleo y diagnóstico mejorado | I, III |
+| `algoritmo/tabu_search.py` | Búsqueda tabú con evaluación centralizada vía PyMoo | I |
+| `gestion_flota/gestor.py` | Gestor de flota con exportación a dos archivos CSV | I |
+| `bodega/scraper.py` | Scraper con Playwright para Portal Inmobiliario | V |
+| `bodega/process_geocoder.py` | Geocodificación de direcciones vía ArcGIS y extracción de comuna | V |
 
-Para cada módulo generado por la IA, el equipo realizó las siguientes validaciones:
+### Proceso de validación aplicado por el equipo
 
-1. **Compilación sintáctica**: `python3 -m py_compile <archivo>` para verificar ausencia de errores de sintaxis.
-2. **Ejecución de prueba**: Runs con muestras pequeñas (20 pedidos) para verificar que las salidas (CSVs, KPIs) fueran coherentes con lo esperado.
-3. **Revisión manual de lógica**: Inspección de los reportes de diagnóstico y los archivos de resultados para confirmar que los valores (tiempos de turno, violaciones de ventana, distancias) correspondían a los datos de entrada.
-4. **Análisis de inconsistencias**: Cuando se detectaron comportamientos anómalos (ej. Shift Spanning, KPIs no esperados), se levantó un nuevo prompt con la descripción del problema para iteración.
+Para cada módulo de código generado por la herramienta de IA, el equipo llevó a cabo el siguiente proceso de validación antes de incorporar los cambios al repositorio del proyecto:
+
+1. **Compilación sintáctica:** Se ejecutó `python3 -m py_compile <archivo>` para verificar la ausencia de errores de sintaxis en cada archivo modificado.
+2. **Ejecución con muestra reducida:** Se realizaron ejecuciones del pipeline con conjuntos de datos de prueba (20 pedidos) para verificar que las salidas, incluyendo archivos CSV, KPIs y registros de diagnóstico, fueran coherentes con los valores esperados.
+3. **Revisión manual de la lógica:** Se inspeccionaron los reportes de diagnóstico y los archivos de resultados para confirmar que los tiempos de turno, las violaciones de ventana de tiempo y las distancias calculadas correspondieran a los datos de entrada utilizados.
+4. **Análisis de inconsistencias e iteración:** Cuando se detectaron comportamientos no esperados, tales como el Shift Spanning, tiempos de espera excesivos o asignaciones incorrectas de turno, el equipo formuló un nuevo prompt describiendo con precisión el problema observado, iniciando así un nuevo ciclo de análisis e implementación con la herramienta de IA.
 
 ---
 
-*Fin del Anexo de Documentación de Uso de IA*
+*Fin del Anexo de Documentación de Uso de Inteligencia Artificial*
 
 ---
 
-**Documento generado:** Abril 2026
-**Herramienta IA:** Antigravity (Google DeepMind)
-**Proyecto:** Captone-Analytics — Optimización Logística TDVRPTW
+**Documento generado:** Abril 2026 | **Herramienta de IA:** Antigravity (Google DeepMind) | **Proyecto:** Captone-Analytics
