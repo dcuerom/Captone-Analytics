@@ -107,15 +107,54 @@ class TDVRPTWProblem(ElementwiseProblem):
         ruta_act = []
         tiempos_llegada = {}
         
+        def get_best_start_shift(c_id):
+            mejor_costo = float('inf')
+            m_p_idx = 0
+            m_t_idx = 0
+            m_cam_t_salida = self.ventanas_salida_turnos[0][0][0]
+            
+            a_c = self.a_dict[c_id]
+            b_c = self.b_dict[c_id]
+            dist_c = float(self.matriz_dist.loc[self.depot_id, c_id])
+            
+            for p_idx, plantilla in enumerate(self.ventanas_salida_turnos):
+                for t_idx, ventana in enumerate(plantilla):
+                    t_base = ventana[0]
+                    # Estimación
+                    t_v = float(tau_ij_vec(np.array([dist_c]), np.array([t_base]), self.dia_semana)[0])
+                    t_lleg = t_base + t_v
+                    
+                    t_salida_test = t_base
+                    if t_lleg < a_c:
+                        esp_evitable = a_c - t_lleg
+                        t_salida_test = min(t_salida_test + esp_evitable, ventana[1])
+                        
+                    t_v_real = float(tau_ij_vec(np.array([dist_c]), np.array([t_salida_test]), self.dia_semana)[0])
+                    t_lleg_real = t_salida_test + t_v_real
+                    
+                    espera_final = max(0.0, a_c - t_lleg_real)
+                    violacion_final = max(0.0, t_lleg_real - b_c)
+                    
+                    # Coste ficticio: se castiga severamente la violación (legitimando la hora de llegada natural superior a la ventana)
+                    costo_test = violacion_final * 10000.0 + espera_final
+                    
+                    if costo_test < mejor_costo:
+                        mejor_costo = costo_test
+                        m_p_idx = p_idx
+                        m_t_idx = t_idx
+                        m_cam_t_salida = t_salida_test
+            return m_p_idx, m_t_idx, m_cam_t_salida
+
         num_camiones_fisicos = 1
-        plantilla_idx = 0
-        ventanas_actual = self.ventanas_salida_turnos[plantilla_idx]
-        turno_idx = 0
         
-        # El camión tiene libertad de salir en cualquier momento de la ventana.
-        # Por defecto, iniciamos en el tiempo más temprano (Earliest Departure).
-        cam_t_salida = ventanas_actual[turno_idx][0] 
+        if ruta_candidata:
+            plantilla_idx, turno_idx, cam_t_salida = get_best_start_shift(ruta_candidata[0])
+        else:
+            plantilla_idx, turno_idx, cam_t_salida = 0, 0, self.ventanas_salida_turnos[0][0][0]
+
+        ventanas_actual = self.ventanas_salida_turnos[plantilla_idx]
         t_actual = cam_t_salida
+        
         nodo_previo = self.depot_id
         detalle_nodos = {}
         detalle_camiones = []  # Métricas por camión
@@ -125,21 +164,6 @@ class TDVRPTWProblem(ElementwiseProblem):
         cam_t_espera = 0.0
         cam_t_servicio = 0.0
         cam_dist = 0.0
-        
-        # --- LÓGICA JIT (Just-In-Time) PARA LA SALIDA INICIAL ---
-        # Antes de empezar, ajustamos la salida del primer camión si es posible
-        if ruta_candidata:
-            c1 = ruta_candidata[0]
-            dist_c1 = float(self.matriz_dist.loc[self.depot_id, c1])
-            # Estimación de viaje con salida más temprana
-            t_v_c1_est = float(tau_ij_vec(np.array([dist_c1]), np.array([cam_t_salida]), self.dia_semana)[0])
-            t_lleg_est = cam_t_salida + t_v_c1_est
-            if t_lleg_est < self.a_dict[c1]:
-                # Hay espera. Retrasamos la salida del depósito.
-                espera_evitable = self.a_dict[c1] - t_lleg_est
-                # No podemos salir después del fin de la ventana de salida del CD
-                cam_t_salida = min(cam_t_salida + espera_evitable, ventanas_actual[turno_idx][1])
-                t_actual = cam_t_salida
 
         for cliente_id in ruta_candidata:
             vol_p = self.vol_dict[cliente_id]
@@ -216,17 +240,8 @@ class TDVRPTWProblem(ElementwiseProblem):
                 else:
                     # El camión anterior no puede o no tiene más turnos. Nuevo camión físico.
                     num_camiones_fisicos += 1
-                    plantilla_idx = (plantilla_idx + 1) % len(self.ventanas_salida_turnos)
+                    plantilla_idx, turno_idx, cam_t_salida = get_best_start_shift(cliente_id)
                     ventanas_actual = self.ventanas_salida_turnos[plantilla_idx]
-                    turno_idx = 0
-                    cam_t_salida = ventanas_actual[turno_idx][0]
-                    
-                    # Aplicamos JIT para el nuevo camión físico
-                    dist_next = float(self.matriz_dist.loc[self.depot_id, cliente_id])
-                    t_v_next = float(tau_ij_vec(np.array([dist_next]), np.array([cam_t_salida]), self.dia_semana)[0])
-                    if cam_t_salida + t_v_next < self.a_dict[cliente_id]:
-                        espera_extra = self.a_dict[cliente_id] - (cam_t_salida + t_v_next)
-                        cam_t_salida = min(cam_t_salida + espera_extra, ventanas_actual[turno_idx][1])
 
                 # Reseteo camión
                 vol_actual = 0.0

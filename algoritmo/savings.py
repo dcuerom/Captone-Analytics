@@ -42,7 +42,7 @@ def calcular_ahorros(df_cluster, matriz_dist, depot_id):
     ahorros.sort(key=lambda x: x['ahorro'], reverse=True)
     return ahorros
 
-def clarke_wright_savings(df_cluster, matriz_dist, depot_id, cap_vol_cm3, cap_peso_g, d_max_min=300.0, speed_kmh=25.0):
+def clarke_wright_savings(df_cluster, matriz_dist, depot_id, cap_vol_cm3, cap_peso_g, d_max_min=300.0, speed_kmh=25.0, holgura_ventana=20.0):
     """
     Heurística constructiva de Ahorros.
     Dado que las ventanas de tiempo son complejas, validamos estáticamente la capacidad 
@@ -60,6 +60,8 @@ def clarke_wright_savings(df_cluster, matriz_dist, depot_id, cap_vol_cm3, cap_pe
     # Extraer demandas a diccionarios
     vol_dict = {}
     peso_dict = {}
+    a_dict = {}
+    b_dict = {}
     df_idx = df_cluster.set_index('id_nodo')
     for cid in clientes:
         if cid in df_idx.index:
@@ -69,9 +71,13 @@ def clarke_wright_savings(df_cluster, matriz_dist, depot_id, cap_vol_cm3, cap_pe
             p_col = 'peso_pedido_g' if 'peso_pedido_g' in df_idx.columns else 'peso_pedido'
             vol_dict[cid] = float(row.get(v_col, 0.0))
             peso_dict[cid] = float(row.get(p_col, 0.0))
+            a_dict[cid] = float(row.get('a_ventana', 0.0))
+            b_dict[cid] = float(row.get('b_ventana', 1440.0))
         else:
             vol_dict[cid] = 0.0
             peso_dict[cid] = 0.0
+            a_dict[cid] = 0.0
+            b_dict[cid] = 1440.0
             
     # Inicializar rutas discretas: un cliente por ruta
     # route_of[cliente] = id_ruta
@@ -85,15 +91,27 @@ def clarke_wright_savings(df_cluster, matriz_dist, depot_id, cap_vol_cm3, cap_pe
     # Función de estimación de tiempo (ida + atención + retorno)
     # velocidad aprox = speed_kmh km/h => speed_kmh*1000/60 m/min
     m_per_min = speed_kmh * 1000.0 / 60.0
-    def est_tiempo(r_list):
-        t = 0.0
-        n_prev = depot_id
-        for n in r_list:
+    def es_viable_ventanas(r_list):
+        if not r_list: return True
+        t_viaje_primero = float(matriz_dist.loc[depot_id, r_list[0]]) / m_per_min
+        t_salida = max(540.0, a_dict[r_list[0]] - t_viaje_primero)
+        t = t_salida + t_viaje_primero
+        
+        n_prev = r_list[0]
+        if t < a_dict[n_prev]: t = a_dict[n_prev]
+        if t > b_dict[n_prev] + holgura_ventana: return False
+        t += 5.0 # aten_fijo
+        
+        for i in range(1, len(r_list)):
+            n = r_list[i]
             t += float(matriz_dist.loc[n_prev, n]) / m_per_min
-            t += 5.0 # aten_fijo
+            if t < a_dict[n]: t = a_dict[n]
+            if t > b_dict[n] + holgura_ventana: return False
+            t += 5.0
             n_prev = n
+            
         t += float(matriz_dist.loc[n_prev, depot_id]) / m_per_min
-        return t
+        return (t - t_salida) <= d_max_min
         
     for ah in ahorros:
         c1, c2 = ah['i'], ah['j']
@@ -114,7 +132,7 @@ def clarke_wright_savings(df_cluster, matriz_dist, depot_id, cap_vol_cm3, cap_pe
             continue 
             
         new_route_list = rutas[r1] + rutas[r2]
-        if est_tiempo(new_route_list) > d_max_min:
+        if not es_viable_ventanas(new_route_list):
             continue
             
         # Unificar! Mergear r2 dentro de r1

@@ -98,7 +98,7 @@ def optimizar_pymoo_ga(cluster_idx, df_cluster, matriz_dist, depot_id, dia_seman
     # 4. Minimización
     terminacion_adaptativa = DefaultSingleObjectiveTermination(
         ftol=1e-3,
-        period=40,
+        period=100,
         n_max_gen=n_gen
     )
     
