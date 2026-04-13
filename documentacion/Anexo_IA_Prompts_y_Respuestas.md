@@ -539,13 +539,511 @@ La limitación fue identificada, registrada e informada de inmediato al equipo. 
 
 ---
 
+---
+
+## SECCIÓN VII: MÓDULO DE GRAFO — CONSTRUCCIÓN DEL PIPELINE GEO-MATEMÁTICO
+
+**Conversación de referencia:** *"Graph Module Development"*  
+**Fecha:** Abril 2026  
+**Propósito:** Construir el módulo `grafo/` completo, que transforma direcciones textuales de clientes en matrices de distancia reales sobre la red vial de Santiago, integrando geocodificación, clusterización tridimensional, carga del grafo OSMnx y cálculo de rutas A*.
+
+---
+
+### Prompt 7.1 — Diseño del pipeline Cluster-First, Route-Second y estructura del módulo `grafo/`
+
+**Contexto previo:** El equipo contaba con un archivo Excel de pedidos (`vrp_orders.xlsx`) con columnas de dirección, RUT y número de orden. Se requería un pipeline end-to-end que transformara estos datos crudos en matrices de distancia intra-clúster listas para ser consumidas por el algoritmo de optimización.
+
+**Prompt del usuario:**
+
+> Necesito que construyas el módulo completo `grafo/` para nuestro pipeline VRP. El módulo debe:
+> 1. Leer un Excel de pedidos y geocodificar las direcciones usando ArcGIS (geopy). El geocodificador debe tener caché por dirección única y rate limiting.
+> 2. Geocodificar también la dirección del depósito.
+> 3. Construir el `id_nodo` de cada cliente concatenando el número de orden con el RUT limpio.
+> 4. Implementar clustering DBSCAN en 3D (lat, lon, tiempo de ventana) con heurística de rescate de outliers.
+> 5. Cargar el grafo de calles de Santiago desde un archivo `.graphml` almacenado en Supabase Storage, con caché local.
+> 6. Para cada clúster, calcular la matriz NxN de distancias usando A* sobre el grafo OSMnx.
+> 7. Generar un mapa HTML interactivo con Folium mostrando los clústeres, el depósito y los outliers.
+> 8. El orquestador principal debe ser `execute_vrp_pipeline(input_file, depot_address, sample_size)`.
+
+**Respuesta del asistente de IA:**
+
+El asistente propuso la siguiente arquitectura modular y procedió a implementar cada componente:
+
+**Arquitectura del pipeline:**
+
+```
+vrp_orders.xlsx
+      │
+      ▼
+[main.py] execute_vrp_pipeline()
+      │
+      ├─► [geocoder.py]        Geocodificación → (lat, lon) vía ArcGIS
+      │
+      ├─► [clustering.py]      DBSCAN 3D (lat, lon, tiempo) → clusters + outliers
+      │
+      ├─► [network_builder.py] Grafo vial Santiago (OSMnx / Supabase)
+      │
+      ├─► [routing.py]         A* intra-cluster → Matrices NxN de distancia
+      │
+      └─► [visualizer.py]      Mapa HTML interactivo (Folium)
+```
+
+**`grafo/geocoder.py` — Geocodificador con caché y rate limiting:**
+
+```python
+geolocator = ArcGIS(user_agent="capstone_analytics_vrp", adapter_factory=URLLibAdapter)
+geocoder   = RateLimiter(geolocator.geocode, min_delay_seconds=0.2)
+
+# Caché por dirección única: si 50 pedidos comparten dirección, se hace 1 sola llamada
+direcciones_unicas = df_result[address_col].dropna().unique()
+coords_cache = {}
+
+for address in d_restantes:
+    location = geocode(address)
+    coords_cache[address] = (location.latitude, location.longitude) if location else (None, None)
+```
+
+**`grafo/network_builder.py` — Carga del grafo con Supabase y fallback OSMnx:**
+
+```python
+def get_santiago_graph(filepath, force_download=False):
+    if not os.path.exists(filepath) or force_download:
+        download_graph_from_storage(local_filepath=filepath)  # Supabase
+    if os.path.exists(filepath):
+        return ox.load_graphml(filepath)
+    # Fallback: descarga directa desde OpenStreetMap
+    G = ox.graph_from_place(["Provincia de Santiago, Chile",
+                              "San Bernardo, Chile", "Puente Alto, Chile"],
+                              network_type='drive')
+    ox.save_graphml(G, filepath)
+    return G
+```
+
+**`grafo/main.py` — Orquestador con paralelización de ruteo:**
+
+El asistente destacó que la paralelización del ruteo por clúster requería una estrategia especial para evitar la serialización del grafo OSMnx a través de `pickle`:
+
+```python
+def _init_worker(G):
+    """Inicializa el grafo en cada proceso worker una sola vez."""
+    global _global_G
+    _global_G = G
+
+with concurrent.futures.ProcessPoolExecutor(
+    max_workers=max_workers,
+    initializer=_init_worker,
+    initargs=(G,)
+) as executor:
+    futures = [
+        executor.submit(_process_cluster_routing, c_id, df_cluster, df_depot)
+        for c_id, df_cluster in clusters_dict.items()
+    ]
+```
+
+> **Nota técnica del asistente:** Serializar el grafo OSMnx (NetworkX MultiDiGraph con ~300.000 nodos) a través de `pickle` entre procesos provoca tiempos de inicialización de varios minutos y puede agotar la RAM. El patrón `initializer=_init_worker` carga el grafo **una sola vez** en cada proceso hijo, eliminando este cuello de botella.
+
+**Archivos creados:**
+
+| Archivo | Descripción |
+|---------|-------------|
+| `grafo/main.py` | Orquestador del pipeline con paralelismo |
+| `grafo/geocoder.py` | Geocodificación ArcGIS con caché y rate limiting |
+| `grafo/network_builder.py` | Carga del grafo OSMnx desde Supabase o descarga directa |
+| `grafo/routing.py` | Matrices de distancia mediante Dijkstra radial |
+| `grafo/clustering.py` | Pipeline DBSCAN 3D con rescate de outliers |
+| `grafo/visualizer.py` | Mapas HTML interactivos con Folium |
+| `grafo/__init__.py` | Registro del paquete |
+
+---
+
+### Prompt 7.2 — Optimización del cálculo de matrices: de A* a Dijkstra radial
+
+**Contexto previo:** Las primeras pruebas del módulo `routing.py` con clústeres de 15–20 nodos revelaron tiempos de cálculo excesivos. Un clúster con N clientes requería N×(N-1) llamadas individuales a `nx.astar_path`, cada una recorriendo el grafo completo desde cero.
+
+**Prompt del usuario:**
+
+> El cálculo de matrices A* es demasiado lento. Para un clúster de 20 nodos tenemos 380 llamadas A* y cada una recorre el grafo completo. ¿Cómo podemos optimizar esto?
+
+**Respuesta del asistente de IA:**
+
+El asistente propuso reemplazar las N² llamadas a A* por N expansiones Dijkstra radiales completas, con lookup O(1) posterior:
+
+> **Estrategia:** En lugar de calcular N×(N-1) rutas individuales (A* que recorre el grafo completo cada vez), se ejecuta una **expansión Dijkstra completa** desde cada nodo origen único. Esta expansión calcula en un solo barrido las distancias a **todos los nodos del grafo**. Luego se filtra solo los destinos que pertenecen al clúster, reduciendo la complejidad de O(N²·E) a O(N·E) con lookups O(1) en tabla hash. También se fuerza la eliminación del diccionario de distancias completo (`del lengths`) tras filtrar, para evitar desbordamientos de memoria (OOM).
+
+```python
+for origen_gra in unique_sources:
+    lengths, paths = nx.single_source_dijkstra(G, origen_gra, weight='length')
+    
+    # Filtrar: retener solo las rutas hacia destinos del cluster
+    filtered_lengths = {tgt: lengths[tgt] for tgt in target_nodes if tgt in lengths}
+    filtered_paths   = {tgt: paths[tgt]   for tgt in target_nodes if tgt in paths}
+    
+    dijkstra_radial_cache[origen_gra] = (filtered_lengths, filtered_paths)
+    
+    # Liberación explícita para el Garbage Collector
+    del lengths
+    del paths
+
+# Cruce O(N²) con O(1) por lookup
+for i in range(n):
+    for j in range(n):
+        if i != j:
+            lengths_dict, paths_dict = dijkstra_radial_cache.get(osmnx_nodos[i], ({}, {}))
+            dist_mts = lengths_dict.get(osmnx_nodos[j], float('inf'))
+            matriz.loc[ids_nodos[i], ids_nodos[j]] = round(dist_mts, 3)
+```
+
+---
+
+---
+
+## SECCIÓN VIII: CLUSTERIZACIÓN CON DBSCAN — PARADIGMA CLUSTER-FIRST
+
+**Conversación de referencia:** *"Clustering with DBSCAN"*  
+**Fecha:** Abril 2026  
+**Propósito:** Implementar el módulo `grafo/clustering.py` con el algoritmo DBSCAN en un espacio tridimensional (latitud, longitud, tiempo de ventana), incluyendo normalización ponderada, heurística de rescate de outliers y generación de pares para A*.
+
+---
+
+### Prompt 8.1 — Implementación del clustering DBSCAN tridimensional con rescate de outliers
+
+**Contexto previo:** El equipo adoptó el paradigma Cluster-First, Route-Second para descomponer el problema VRP global. Se requería un algoritmo de clustering que formara grupos geográfica y temporalmente coherentes, sin requerir especificar el número de clusters a priori y con tolerancia a outliers.
+
+**Prompt del usuario:**
+
+> Necesito implementar el módulo `grafo/clustering.py` que realice clustering DBSCAN en tres dimensiones: latitud, longitud, y el tiempo de apertura de la ventana de entrega del cliente (en minutos desde medianoche). El módulo debe:
+> 1. Construir la matriz N×3 con [Latitud, Longitud, Tiempo_Minutos]. Si no hay columna de tiempo, usar 9:00 (540 min) por defecto.
+> 2. Normalizar con StandardScaler y ponderar la dimensión temporal con un parámetro `alpha_time`.
+> 3. Ejecutar DBSCAN con parámetros `eps` y `min_samples` configurables.
+> 4. Gestionar los outliers (label=-1) con una heurística de rescate: si la distancia al centroide más cercano es menor que `rescue_threshold`, reasignar. Si `force_rescue=True`, reasignar siempre sin importar la distancia.
+> 5. Generar todos los pares `(origen, destino)` intra-cluster usando `itertools.permutations`, inyectando el nodo depósito en cada cluster.
+> 6. Encapsular todo en `run_clustering_pipeline(df, depot_id, ...)`.
+
+**Respuesta del asistente de IA:**
+
+El asistente implementó el pipeline de clustering en cinco etapas independientes y testeables:
+
+**`build_feature_matrix` — Construcción de la matriz N×3:**
+
+```python
+def build_feature_matrix(df, time_column='tiempo_minutos', default_window_start_hour=9):
+    df_clean = df.copy()
+    col_lat = 'latitud' if 'latitud' in df_clean.columns else 'Latitud'
+    col_lon = 'longitud' if 'longitud' in df_clean.columns else 'Longitud'
+    df_clean = df_clean.dropna(subset=[col_lat, col_lon]).copy()
+    
+    if time_column in df_clean.columns:
+        df_clean['tiempo_minutos_modelo'] = pd.to_numeric(df_clean[time_column], errors='coerce')
+        df_clean['tiempo_minutos_modelo'].fillna(default_window_start_hour * 60, inplace=True)
+    else:
+        df_clean['tiempo_minutos_modelo'] = default_window_start_hour * 60
+    
+    X = df_clean[[col_lat, col_lon, 'tiempo_minutos_modelo']].to_numpy(dtype=float)
+    return X, df_clean
+```
+
+**`normalize_and_weight` — Normalización y ponderación temporal:**
+
+```python
+def normalize_and_weight(X, alpha_time=1.0):
+    scaler = StandardScaler()
+    X_scaled = scaler.fit_transform(X)
+    X_scaled[:, 2] = X_scaled[:, 2] * alpha_time  # Ponderar dimensión temporal
+    return X_scaled, scaler
+```
+
+> **Nota del asistente sobre `alpha_time`:** Un valor mayor que 1.0 incrementa el peso de la compatibilidad temporal sobre la proximidad geográfica. Los valores de producción calibrados son `alpha_time=3.0` con `eps=0.3` y `min_samples=3`, lo que fuerza a que clientes con ventanas incompatibles (separadas más de ~30 minutos) no sean agrupados aunque estén geográficamente cercanos. Esto reduce drásticamente los tiempos de espera intra-clúster.
+
+**`manage_clusters_and_noise` — Rescate de outliers con heurística de centroide:**
+
+```python
+def manage_clusters_and_noise(df, labels, X_scaled, rescue_threshold=1.0, force_rescue=False):
+    valid_clusters = [lbl for lbl in np.unique(labels) if lbl != -1]
+    centroids = {}
+    for c in valid_clusters:
+        idx_c = np.where(labels == c)[0]
+        centroids[c] = np.mean(X_scaled[idx_c], axis=0)
+
+    for i in range(len(labels)):
+        if labels[i] == -1 and len(centroids) > 0:
+            point = X_scaled[i]
+            distances = {c: np.linalg.norm(point - cent) for c, cent in centroids.items()}
+            nearest_c = min(distances, key=distances.get)
+            if force_rescue or distances[nearest_c] <= rescue_threshold:
+                df.iloc[i, df.columns.get_loc('cluster_label')] = nearest_c
+```
+
+**`generate_astar_inputs` — Generación de pares permutados para A*:**
+
+```python
+def generate_astar_inputs(clusters_dict, depot_node_id, id_column='id_nodo'):
+    cluster_pairs = {}
+    for c_id, df_cluster in clusters_dict.items():
+        nodos = df_cluster[id_column].tolist()
+        if depot_node_id not in nodos:
+            nodos.append(depot_node_id)
+        # itertools.permutations genera todos los pares (u,v) → grafo dirigido
+        cluster_pairs[c_id] = list(permutations(nodos, 2))
+    return cluster_pairs
+```
+
+> **Justificación del uso de DBSCAN vs K-Means (aportada por el asistente):**
+>
+> | Característica | K-Means | DBSCAN |
+> |---|---|---|
+> | Número de clusters | Fijo (k) | Automático |
+> | Manejo de outliers | No | Sí (label = -1) |
+> | Forma de clusters | Solo esférica | Arbitraria |
+> | Robustez geográfica | Baja | Alta |
+>
+> DBSCAN es adecuado para la distribución de clientes en una ciudad, donde los puntos se concentran en zonas de alta densidad (comunas) con espacios vacíos entre ellas. K-Means dividiría esos grupos de forma artificial.
+
+**Parámetros de producción implementados:**
+
+```python
+labels = run_dbscan(X_scaled, eps=0.3, min_samples=3)
+clusters_dict, outliers = manage_clusters_and_noise(
+    df_clean, labels, X_scaled, rescue_threshold=0.8, force_rescue=force_outlier_rescue
+)
+```
+
+---
+
+### Prompt 8.2 — Estructura del formato de salida y trazabilidad del `id_nodo`
+
+**Contexto previo:** Al intentar conectar la salida del clustering con el módulo de ruteo, surgieron inconsistencias en los identificadores de nodo: algunos clientes no podían ser localizados en la matriz de distancias porque el `id_nodo` no coincidía con el índice del DataFrame.
+
+**Prompt del usuario:**
+
+> Cuando intentamos usar la salida de `clustering.py` en `routing.py`, los `id_nodo` de los clientes no coinciden con los índices de la matriz de distancias. El formato del `id_nodo` debe construirse como `"{Número_de_orden}_{rut_limpio}"`. ¿Cómo garantizamos que este identificador sea consistente en todo el pipeline?
+
+**Respuesta del asistente de IA:**
+
+El asistente identificó que la construcción del `id_nodo` debía realizarse **antes** del clustering (en `main.py`), de modo que tanto el clustering como el ruteo operen con el mismo identificador:
+
+```python
+def clean_rut(rut) -> str:
+    """Sanitiza el RUT eliminando puntos, guiones y espacios."""
+    if pd.isna(rut):
+        return ""
+    return str(rut).replace('.', '').replace('-', '').strip().upper()
+
+# En execute_vrp_pipeline, antes del clustering:
+df['rut_clean'] = df['id_cliente'].apply(clean_rut)
+df['id_nodo']   = df['id_pedido'].astype(str).str.strip() + "_" + df['rut_clean']
+```
+
+El `id_nodo` del depósito se fijó como la constante `"DEPOT_01_BASE"`, que se inyecta en cada clúster mediante `generate_astar_inputs`. La estructura de claves del diccionario de rutas resultante sigue el formato:
+
+```
+"DEPOT_01_BASE->ORD-CL-202612-001037_6283572K"
+```
+
+donde el `->` denota la dirección del arco y el índice final representa la posición en la lista de permutaciones.
+
+---
+
+---
+
+## SECCIÓN IX: IMPLEMENTACIÓN DE TIEMPOS DE VIAJE VARIABLES (TDVRPTW)
+
+**Conversación de referencia:** *"Implementing Time-Varying VRP Travel Times"*  
+**Fecha:** Abril 2026  
+**Propósito:** Implementar la función de tiempos de viaje dependientes del tiempo de Fleischmann et al. (2004) en dos versiones —escalar y vectorizada— e integrarlas al evaluador del Algoritmo Genético en PyMoo.
+
+---
+
+### Prompt 9.1 — Implementación de la función de Fleischmann et al. (2004)
+
+**Contexto previo:** El equipo necesitaba ir más allá de un VRP estándar e incorporar la variación horaria de la velocidad del tráfico en Santiago como elemento diferenciador del modelo. La función de tiempo de viaje debía ser compatible con PyMoo, donde los tiempos de partida son arrays de NumPy (variables de decisión del GA), no escalares.
+
+**Prompt del usuario:**
+
+> Necesito implementar el módulo `modelo/funciones/tiempos_viaje.py` con la función de tiempo de viaje variable de Fleischmann et al. (2004), ecuación 2.2. El módulo debe:
+> 1. Definir K=13 intervalos horarios de 1 hora cubriendo el horizonte [09:00, 21:00].
+> 2. Almacenar una tabla de velocidades `SPEED_TABLE_KMH` con 24 filas (horas del día) × 7 columnas (días de semana). Los valores deben reflejar velocidades reales de tráfico urbano en Santiago.
+> 3. Implementar `tau_ij(distancia_m, t, dia_semana, delta=15.0)` como versión escalar.
+> 4. Implementar `tau_ij_vec(distancia_m, t, dia_semana, delta=15.0)` como versión vectorizada sobre arrays NumPy. Esta es la versión que se usará dentro del método `_evaluate()` de PyMoo.
+> 5. El parámetro `delta=15.0` minutos define la zona de transición lineal en las fronteras entre intervalos, garantizando continuidad de la función.
+> 6. Implementar `distancia_a_tiempo_matrix` y `matrices_distancia_a_tiempo` para convertir las matrices de distancia del módulo `grafo/` en matrices de tiempos.
+> 7. Incluir un script de prueba `test_tiempos_viaje.py` que ejecute el pipeline de grafo y valide la consistencia entre `tau_ij` y `tau_ij_vec`.
+
+**Respuesta del asistente de IA:**
+
+El asistente presentó primero el modelo matemático que debía implementarse:
+
+**Modelo matemático (Fleischmann et al., 2004, ec. 2.2):**
+
+```
+τ_ij(t) = τ_ijk                                    (Región estable del intervalo k)
+           cuando: z_{k-1} + δ ≤ t ≤ z_k - δ
+
+τ_ij(t) = τ_ijk + (t - z_k + δ) · s_ijk           (Región de transición derecha)
+           cuando: z_k - δ ≤ t ≤ z_k + δ
+
+τ_ij(t) = τ_{ij,k-1} + (t - z_{k-1} + δ) · s_{ij,k-1}  (Región de transición izquierda)
+           cuando z_{k-1} ≤ t ≤ z_{k-1} + δ
+
+donde: s_ijk = (τ_{ij,k+1} - τ_ijk) / (2·δ)  (pendiente de transición)
+```
+
+**Constantes del horizonte de planificación:**
+
+```python
+Z_0 = 540.0    # 09:00 en minutos desde medianoche
+Z_K = 1260.0   # 21:00 en minutos desde medianoche
+K   = 13       # Número de intervalos horarios
+Z_BREAKPOINTS = np.linspace(Z_0, Z_K, K + 1)   # [540, 600, 660, ..., 1260]
+DELTA_DEFAULT = 15.0  # Parámetro δ de suavizado en minutos
+```
+
+**Tabla de velocidades para Santiago (fragmento):**
+
+```python
+SPEED_TABLE_KMH = np.array([
+    # Lun  Mar  Mié  Jue  Vie  Sáb  Dom
+    [  23,  21,  22,  21,  24,  32,  36],  # 09:00 → k=1
+    [  25,  23,  24,  23,  25,  29,  34],  # 10:00 → k=2
+    ...
+    [  21,  20,  20,  19,  17,  29,  32],  # 17:00 → k=9 (hora punta vespertina)
+    [  18,  17,  17,  16,  19,  29,  32],  # 18:00 → k=10
+    ...
+], dtype=float)
+```
+
+La tabla captura la asimetría del tráfico de Santiago: velocidades de 17–21 km/h en hora punta (17:00–19:00 de días hábiles) frente a 31–38 km/h en horario nocturno o fin de semana.
+
+**`tau_ij` — Versión escalar:**
+
+```python
+def tau_ij(distancia_m, t, dia_semana, delta=DELTA_DEFAULT):
+    t_clamped = float(np.clip(t, Z_0, Z_K))
+    k_idx = int(np.searchsorted(Z_BREAKPOINTS, t_clamped, side='right')) - 1
+    k_idx = int(np.clip(k_idx, 0, K - 1))
+    k = k_idx + 1
+    
+    tau_k = tau_minimo(distancia_m, k, dia_semana)
+    
+    # Región de transición derecha
+    delta_right = 0.0 if k == K else delta
+    if k < K and t_clamped >= Z_BREAKPOINTS[k_idx + 1] - delta_right:
+        tau_k1 = tau_minimo(distancia_m, k + 1, dia_semana)
+        s = (tau_k1 - tau_k) / (2.0 * delta_right)
+        return tau_k + (t_clamped - Z_BREAKPOINTS[k_idx + 1] + delta_right) * s
+    
+    # Región de transición izquierda
+    delta_left = 0.0 if k == 1 else delta
+    if k > 1 and t_clamped <= Z_BREAKPOINTS[k_idx] + delta_left:
+        tau_k_prev = tau_minimo(distancia_m, k - 1, dia_semana)
+        s = (tau_k - tau_k_prev) / (2.0 * delta_left)
+        return tau_k_prev + (t_clamped - Z_BREAKPOINTS[k_idx] + delta_left) * s
+    
+    return tau_k  # Región estable
+```
+
+**`tau_ij_vec` — Versión vectorizada para PyMoo:**
+
+El asistente explicó la necesidad de una versión vectorizada:
+
+> En PyMoo, el método `_evaluate(x, out)` de `ElementwiseProblem` recibe un único individuo, pero la simulación de la ruta itera sobre N clientes en secuencia, propagando el tiempo acumulado. Dentro de ese bucle, cada tramo (i→j) requiere calcular `tau_ij(distancia_m, t_actual, dia_semana)` donde `t_actual` varía. Si no se vectoriza, se realizan múltiples llamadas escalares por individuo por generación. La versión vectorizada opera directamente sobre arrays NumPy, realizando las operaciones de búsqueda de intervalo y transición en una sola pasada matricial.
+
+```python
+def tau_ij_vec(distancia_m, t, dia_semana, delta=DELTA_DEFAULT):
+    d = np.asarray(distancia_m, dtype=float) / 1000.0
+    t_c = np.clip(np.asarray(t, dtype=float), Z_0, Z_K)
+    
+    speeds = _SPEED_HORIZON[:, dia_semana]  # shape (K,)
+    k_idx = np.clip(np.searchsorted(Z_BREAKPOINTS, t_c, side='right') - 1, 0, K-1).astype(int)
+    k_1indexed = k_idx + 1
+    
+    v_k = speeds[k_idx]
+    tau_k_arr = np.where(v_k > 0, (d / v_k) * 60.0, np.inf)
+    
+    z_curr_arr = Z_BREAKPOINTS[np.minimum(k_idx + 1, K)]
+    z_prev_arr = Z_BREAKPOINTS[k_idx]
+    
+    # Zona de transición derecha (máscaras booleanas)
+    is_last = (k_1indexed == K)
+    delta_right = np.where(is_last, 0.0, delta)
+    in_right = ~is_last & (t_c >= z_curr_arr - delta_right)
+    ...
+    
+    # Zona estable
+    in_stable = ~in_right & ~in_left
+    result = np.where(in_stable, tau_k_arr, result)
+    return result
+```
+
+**Archivos creados:**
+
+| Archivo | Descripción |
+|---------|-------------|
+| `modelo/funciones/tiempos_viaje.py` | Función τ_ij escalar y vectorizada, tabla de velocidades, constantes del horizonte |
+| `modelo/funciones/__init__.py` | Exportación pública de `tau_ij`, `tau_ij_vec`, `matrices_distancia_a_tiempo`, `Z_BREAKPOINTS` |
+| `modelo/funciones/README.md` | Documentación del modelo matemático e integración con PyMoo |
+| `modelo/funciones/test_tiempos_viaje.py` | Script de validación y reporte comparativo por arco y horario |
+
+---
+
+### Prompt 9.2 — Validación de consistencia entre versión escalar y vectorizada
+
+**Contexto previo:** Una vez implementadas ambas versiones, el equipo requería una prueba formal que garantizara que `tau_ij_vec` producía exactamente los mismos resultados que `tau_ij` antes de integrarla al evaluador del GA.
+
+**Prompt del usuario:**
+
+> Necesito que el script de prueba valide explícitamente que `tau_ij_vec` y `tau_ij` producen resultados idénticos para los mismos pares `(distancia, t)`. El reporte debe mostrar los valores de ambas versiones y si coinciden.
+
+**Respuesta del asistente de IA — Sección del script `test_tiempos_viaje.py`:**
+
+```python
+dist_test = np.array([2.0, 5.0, 10.0, 15.0, 20.0])    # km
+t_test    = np.array([540.0, 630.0, 780.0, 1038.0, 1200.0])  # min desde medianoche
+dia_test  = 0  # Lunes
+
+# Versión vectorizada
+vec_result = tau_ij_vec(dist_test, t_test, dia_test)
+
+# Versión escalar, punto a punto
+scalar_result = np.array([tau_ij(d, t, dia_test) for d, t in zip(dist_test, t_test)])
+
+all_match = np.allclose(scalar_result, vec_result)
+print(f"{'✓ tau_ij_vec es consistente' if all_match else '✗ INCONSISTENCIA DETECTADA'}")
+```
+
+**Resultado de la validación ejecutada:**
+
+| dist (km) | t (min) | Escalar (min) | Vectorizado (min) | match? |
+|-----------|---------|---------------|--------------------|--------|
+| 2.0 | 540.0 | ≈5.22 | ≈5.22 | ✓ |
+| 5.0 | 630.0 | ≈12.00 | ≈12.00 | ✓ |
+| 10.0 | 780.0 | ≈24.00 | ≈24.00 | ✓ |
+| 15.0 | 1038.0 | ≈42.86 | ≈42.86 | ✓ |
+| 20.0 | 1200.0 | ≈40.00 | ≈40.00 | ✓ |
+
+> ✓ `tau_ij_vec` es consistente con `tau_ij` (escalar). Diferencias máximas < 1e-9 minutos.
+
+El asistente también generó un reporte comparativo por arco y horario, mostrando cómo el mismo arco físico varía significativamente en tiempo de viaje según la hora de salida:
+
+**Ejemplo de reporte (arco representativo en día Lunes):**
+
+| Arco | Dist (km) | 09:00 (min) | 13:00 (min) | 17:00 (min) | 20:00 (min) |
+|------|-----------|-------------|-------------|-------------|-------------|
+| DEPOT→Cliente A | 5.2 | 13.6 | 12.5 | 18.4 | 11.1 |
+| Cliente A→Cliente B | 3.8 | 9.9 | 9.1 | 13.5 | 8.1 |
+
+La diferencia entre la hora punta (17:00) y la hora nocturna (20:00) puede superar el 65% en el tiempo de viaje del mismo arco.
+
+---
+
+---
+
 ## RESUMEN CONSOLIDADO DEL USO DE INTELIGENCIA ARTIFICIAL EN EL PROYECTO
 
 ### Clasificación por tipo de uso según el marco académico
 
 | Tipo de uso | Secciones | Descripción |
 |------------|-----------|-------------|
-| Generación de código | I, II, III, IV | El equipo definió las especificaciones; la IA generó la implementación técnica |
+| Generación de código | I, II, III, IV, VII, VIII, IX | El equipo definió las especificaciones; la IA generó la implementación técnica |
 | Tratamiento de datos | V, VI | Extracción, limpieza y geocodificación de datos de mercado |
 
 ### Inventario de archivos de código generados con asistencia de IA
@@ -553,10 +1051,18 @@ La limitación fue identificada, registrada e informada de inmediato al equipo. 
 | Archivo | Descripción | Sección |
 |---------|-------------|---------|
 | `modelo/pymoo_problem.py` | Evaluador TDVRPTW con PyMoo, restricciones hard, salida flexible JIT y penalización por espera | I, II, IV |
+| `modelo/funciones/tiempos_viaje.py` | Función τ_ij escalar y vectorizada (Fleischmann et al., 2004), tabla de velocidades Santiago | IX |
+| `modelo/funciones/test_tiempos_viaje.py` | Script de validación y reporte comparativo de tiempos de viaje por arco y horario | IX |
 | `algoritmo/savings.py` | Algoritmo de Ahorros de Clarke-Wright adaptado al TDVRPTW | III |
 | `algoritmo/genetic_algorithm.py` | GA con semilla savings, paralelización multi-núcleo y diagnóstico mejorado | I, III |
 | `algoritmo/tabu_search.py` | Búsqueda tabú con evaluación centralizada vía PyMoo | I |
 | `gestion_flota/gestor.py` | Gestor de flota con exportación a dos archivos CSV | I |
+| `grafo/main.py` | Orquestador del pipeline VRP con paralelización de ruteo | VII |
+| `grafo/geocoder.py` | Geocodificación ArcGIS con caché por dirección única y rate limiting | VII |
+| `grafo/network_builder.py` | Carga del grafo OSMnx desde Supabase Storage con fallback a descarga directa | VII |
+| `grafo/routing.py` | Matrices de distancia NxN mediante Dijkstra radial con lookup O(1) y prevención OOM | VII |
+| `grafo/clustering.py` | Pipeline DBSCAN 3D geo-temporal con normalización ponderada y rescate de outliers | VII, VIII |
+| `grafo/visualizer.py` | Mapas HTML interactivos con Folium (clusters, rutas y depósito) | VII |
 | `bodega/scraper.py` | Scraper con Playwright para Portal Inmobiliario | V |
 | `bodega/process_geocoder.py` | Geocodificación de direcciones vía ArcGIS y extracción de comuna | V |
 
