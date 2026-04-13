@@ -155,7 +155,7 @@ def min_a_hora(minutos: float) -> str:
     return f"{h:02d}:{m:02d}"
 
 
-def disparar_rutina_ga(fecha_target='2026-12-04', holgura_ventana=15.0, max_camiones=20,
+def disparar_rutina_ga(fecha_target='2026-12-05', holgura_ventana=15.0, max_camiones=20,
                        pop_size=1500, n_gen=2000, alpha_espera=50000.0, cap_vol_cm3=3750000.0, cap_peso_g=803333.33):
     print(f"=== INICIANDO TDVRPTW - GA OFICIAL PYMOO [{fecha_target}] ===")
     t0 = time.time()
