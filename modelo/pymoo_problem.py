@@ -191,6 +191,16 @@ class TDVRPTWProblem(ElementwiseProblem):
             # SPLIT CONDICIONAL (Activa regreso al depósito si se violan capacidades o la duración del turno supera el bloque d_max)
             necesita_split = (vol_actual + vol_p > self.cap_vol_cm3) or (peso_actual + peso_p > self.cap_peso_g) or (duracion_turno_estimada > self.d_max_min)
             
+            if necesita_split and not ruta_act:
+                # HARD CONSTRAINT:
+                # Si el camión está COMPLETAMENTE VACÍO (ruta_act está vacío) y aún así se viola la restricción,
+                # significa que el pedido del cliente INDIVIDUAL excede la capacidad total del camión (peso/vol),
+                # o es imposible visitarlo individualmente dentro de d_max_min.
+                # Al ser una Hard Constraint, es físicamente imposible atenderlo. Lo enviamos directamente a Backlog.
+                restricciones_fail += 50000.0  # Fuerte penalización en el fitness para desincentivar malas rutas, pero ineludible para pedidos gigantes.
+                i += 1
+                continue
+
             if necesita_split:
                 # Regreso del camión actual al depósito
                 dist_reg = float(self.matriz_dist.loc[nodo_previo, self.depot_id])
