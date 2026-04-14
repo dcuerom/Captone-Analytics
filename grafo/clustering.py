@@ -164,12 +164,7 @@ def run_clustering_pipeline(
     depot_id: str, 
     id_column: str = 'id_nodo', 
     force_outlier_rescue: bool = False,
-    time_column: str = 'ventana_tiempo_minutos',
-    default_window_start_hour: int = 9,
-    alpha_time: float = 10.0,
-    eps: float = 0.3,
-    min_samples: int = 3,
-    rescue_threshold: float = 0.8,
+    time_column: str = 'ventana_tiempo_minutos'
 ) -> Tuple[Dict, pd.DataFrame, Dict]:
     """
     Encapsula toda la lógica de clustering (Cluster-First) en un solo pipe.
@@ -181,32 +176,19 @@ def run_clustering_pipeline(
     print("\n--- Ejecutando pre-procesamiento CLUSTER-FIRST ---")
     
     # 1. Extracción con Tiempo Dinámico
-    X, df_clean = build_feature_matrix(
-        df,
-        time_column=time_column,
-        default_window_start_hour=default_window_start_hour,
-    )
-    if X.shape[0] == 0:
-        raise ValueError(
-            "No hay pedidos con coordenadas válidas para clustering. "
-            "Verifica la fecha seleccionada y las columnas latitud/longitud del CSV."
-        )
+    X, df_clean = build_feature_matrix(df, time_column=time_column, default_window_start_hour=9)
     
-    # 2. Normalización (alpha configurable para dar más/menos peso temporal)
-    X_scaled, _ = normalize_and_weight(X, alpha_time=alpha_time)
+    # 2. Normalización (alpha=1.0 por defecto, pero escalable)
+    X_scaled, _ = normalize_and_weight(X, alpha_time=3.0)
     
     # 3. DBSCAN
     # Nota: Los hiperparámetros eps y min_samples requieren calibración 
     # según la densidad de la ciudad y el tamaño de la flota.
-    labels = run_dbscan(X_scaled, eps=eps, min_samples=min_samples)
+    labels = run_dbscan(X_scaled, eps=0.3, min_samples=3)
     
     # 4. Gestión
     clusters_dict, outliers = manage_clusters_and_noise(
-        df_clean,
-        labels,
-        X_scaled,
-        rescue_threshold=rescue_threshold,
-        force_rescue=force_outlier_rescue,
+        df_clean, labels, X_scaled, rescue_threshold=0.8, force_rescue=force_outlier_rescue
     )
     
     # 5. Generación de entradas
