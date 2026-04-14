@@ -1037,13 +1037,173 @@ La diferencia entre la hora punta (17:00) y la hora nocturna (20:00) puede super
 
 ---
 
+## SECCION X: CASO BASE HEURISTICO NN/TSP, DISTANCIA VIAL Y KPIs OPERACIONALES
+
+**Conversacion de referencia:** *"Caso Base NN/TSP sin clusterizacion ni ventanas de tiempo activas"*  
+**Fecha:** Abril 2026  
+**Proposito:** Construir un pipeline alternativo al modelo genetico para ejecutar ruteo caso base con heuristica de vecino mas cercano/TSP, con trazabilidad operativa en HTML + Markdown y KPIs configurables.
+
+---
+
+### Prompt 10.1 - Ejecucion de instancias .vrp en caso base (sin modelo)
+
+**Contexto previo:** El equipo necesitaba comparar el caso base contra cotas UB en instancias estandar VRP, sin usar el modelo TDVRPTW ni clusterizacion.
+
+**Prompt del usuario:**
+
+> No utilizaremos el modelo como tal. Para encontrar rutas, usa vecino mas cercano, sin clusterizacion y sin ventanas de tiempo. Corre las instancias de prueba del listado Excel y entrega resultados en `res_casobase` con un README del flujo y del algoritmo.
+
+**Respuesta del asistente de IA:**
+
+Se implemento un flujo de ejecucion para instancias `.vrp` con heuristica NN, considerando:
+
+- lectura de `CAPACITY`, `NODE_COORD_SECTION` y `DEMAND_SECTION`
+- construccion de rutas por capacidad
+- consolidacion de resultados por instancia en Markdown
+- comparacion contra la columna UB con calculo de GAP
+- documentacion del pipeline y del codigo en README
+
+Como resultado, se genero el script de caso base `res_casobase_pruebas/caso_base_nn.py` junto a reportes por instancia y un resumen consolidado.
+
+---
+
+### Prompt 10.2 - Pipeline casoBase con pedidos reales y salida operacional
+
+**Contexto previo:** Luego de validar instancias benchmark, el equipo solicito un caso base sobre datos operacionales reales (`vrp_orders.xlsx` y `df_despacho.csv`) con visualizacion equivalente a los reportes del proyecto.
+
+**Prompt del usuario:**
+
+> Haz lo mismo para nuestro caso particular, creando/editando archivos en `casoBase` con pedidos de `vrp_orders.xlsx` y `df_despacho.csv`. Debe haber hiperparametros de depot, capacidades, cantidad de camiones y dia. No usar ventanas de tiempo reales ni clusterizacion de clientes. Entregar resultados en `casoBase_res` con mapas HTML y detalle de rutas.
+
+**Respuesta del asistente de IA:**
+
+Se implemento un pipeline completo en `casoBase/run_caso_base_tsp.py`, con:
+
+- merge robusto de datos de pedidos y despacho
+- ventana operativa forzada para todos los pedidos `[540, 1260]`
+- heuristica de vecino mas cercano en esquema round-robin por camion
+- soporte de salida por dia (`yyyy-mm-dd`)
+- exportacion de:
+  - mapa interactivo HTML por camion
+  - detalle de rutas/paradas en Markdown
+  - CSV de paradas
+  - CSV de no asignados
+  - README automatico en `casoBase_res`
+
+---
+
+### Prompt 10.3 - Ajustes de parametrizacion y usabilidad del flujo
+
+**Contexto previo:** Durante la iteracion, el equipo requirio mayor control de unidades, naming de archivos y facilidad de ejecucion local.
+
+**Prompt del usuario:**
+
+> Quiero el dia en formato `yyyy-mm-dd`, capacidades separadas por peso y volumen en unidades de tablas, velocidad promedio como hiperparametro, y que los resultados terminen con la fecha del dia corrido. Tambien agrega numeracion de cliente visitado en HTML.
+
+**Respuesta del asistente de IA:**
+
+Se actualizaron los hiperparametros y salidas para incluir:
+
+- `--day` con validacion estricta `yyyy-mm-dd`
+- `--truck-capacity-g` y `--truck-capacity-cm3` como capacidades simultaneas
+- `--avg-speed-kmh` (default 25 km/h)
+- sufijo de artefactos basado en `--day` (no en fecha de ejecucion)
+- numeracion visible de visita por camion en marcadores HTML
+
+Adicionalmente, se documento el procedimiento de apertura de archivos HTML en PC y el uso correcto del entorno virtual del proyecto.
+
+---
+
+### Prompt 10.4 - Distancias de red vial real de Santiago
+
+**Contexto previo:** El equipo solicito reemplazar distancia euclidiana por distancia de calles reales usando el grafo vial ya disponible en el repositorio.
+
+**Prompt del usuario:**
+
+> Es posible usar distancias de calles de Santiago? En `grafo/network_builder.py` se carga el grafo vial. Revisa README/proyecto para usar distancia real entre nodos.
+
+**Respuesta del asistente de IA:**
+
+Se incorporo modo dual de distancias:
+
+- `--distance-mode road`: usa `grafo/network_builder.py` + `grafo/routing.py` para matriz vial real
+- `--distance-mode haversine`: fallback geodesico para ejecuciones livianas
+
+Tambien se entregaron pasos de diagnostico para errores de entorno/venv al importar `osmnx`, `numpy`, `scipy` y `sklearn`.
+
+---
+
+### Prompt 10.5 - Trazabilidad temporal en HTML/Markdown y KPIs en salida
+
+**Contexto previo:** El equipo requirio trazabilidad de tiempos de llegada en todos los artefactos operacionales y una tabla KPI consistente con formato ejecutivo.
+
+**Prompt del usuario:**
+
+> En el HTML ya no aparece la hora de llegada a cliente. Quiero que se incluya. Ademas, agrega KPIs en el markdown; los que no se puedan calcular, dejalos en blanco por ahora.
+
+**Respuesta del asistente de IA:**
+
+Se reforzo la salida con:
+
+- hora de llegada por cliente en popups/tooltips del HTML
+- hora de llegada al depot en resumen de cada ruta en Markdown
+- popup del depot en HTML con listado de llegadas por camion/ruta
+- tabla de KPIs en `rutas_tsp_*.md`, manteniendo vacios los indicadores sin regla definida (p. ej. costos fijos y penalizacion por espera)
+
+---
+
+### Prompt 10.6 - Formulas KPI y defaults operacionales finales
+
+**Contexto previo:** Tras definir los factores de negocio, el equipo solicito convertirlos en hiperparametros para escenarios de sensibilidad.
+
+**Prompt del usuario:**
+
+> Multiplica 1200 [$/km] para costo. Para emisiones usa 2.68 [CO2/Lt] y rendimiento 6.5 [km/Lt], conviertelo a CO2/km y multiplicalo por distancia. Calcula tambien litros diesel con el rendimiento. Luego agrega esos factores como hiperparametros y dejalos por defecto. Cambia direccion default a "SANTA ELENA 840 SANTIAGO" y capacidad default a 3750000 [cm3] y 803333.33 [kg].
+
+**Respuesta del asistente de IA:**
+
+Se implementaron formulas KPI y parametrizacion completa:
+
+- Costo de ruta: `cost_per_km * distancia_total_km`
+- Litros diesel: `distancia_total_km / diesel_km_per_liter`
+- Emisiones totales: `distancia_total_km * (co2_kg_per_liter / diesel_km_per_liter)`
+- Emisiones por pedido: `emisiones_totales / pedidos_entregados`
+
+Hiperparametros agregados:
+
+- `--cost-per-km` (default `1200`)
+- `--diesel-km-per-liter` (default `6.5`)
+- `--co2-kg-per-liter` (default `2.68`)
+
+Defaults operacionales actualizados:
+
+- `--depot-address`: `SANTA ELENA 840 SANTIAGO`
+- `--truck-capacity-cm3`: `3750000`
+- `--truck-capacity-g`: `803333330` (equivale a `803333.33 kg`)
+
+---
+
+### Resumen de lo construido en esta sesion
+
+A traves de esta sesion, el asistente de IA genero e implemento:
+
+1. Un flujo de caso base para instancias benchmark `.vrp` con evaluacion UB/GAP y reporte consolidado.
+2. Un pipeline operativo en `casoBase` sobre pedidos reales, sin clusterizacion de clientes ni ventanas de tiempo activas.
+3. Integracion de distancias de red vial real de Santiago como modo de ruteo.
+4. Salidas visuales y tabulares con trazabilidad de llegadas por cliente y depot.
+5. KPIs de costo, diesel y CO2 parametrizados para analisis de sensibilidad.
+
+---
+
+---
+
 ## RESUMEN CONSOLIDADO DEL USO DE INTELIGENCIA ARTIFICIAL EN EL PROYECTO
 
 ### Clasificación por tipo de uso según el marco académico
 
 | Tipo de uso | Secciones | Descripción |
 |------------|-----------|-------------|
-| Generación de código | I, II, III, IV, VII, VIII, IX | El equipo definió las especificaciones; la IA generó la implementación técnica |
+| Generación de código | I, II, III, IV, VII, VIII, IX, X | El equipo definió las especificaciones; la IA generó la implementación técnica |
 | Tratamiento de datos | V, VI | Extracción, limpieza y geocodificación de datos de mercado |
 
 ### Inventario de archivos de código generados con asistencia de IA
@@ -1065,6 +1225,8 @@ La diferencia entre la hora punta (17:00) y la hora nocturna (20:00) puede super
 | `grafo/visualizer.py` | Mapas HTML interactivos con Folium (clusters, rutas y depósito) | VII |
 | `bodega/scraper.py` | Scraper con Playwright para Portal Inmobiliario | V |
 | `bodega/process_geocoder.py` | Geocodificación de direcciones vía ArcGIS y extracción de comuna | V |
+| `res_casobase_pruebas/caso_base_nn.py` | Heurística de vecino más cercano para instancias benchmark `.vrp`, con comparación UB y GAP | X |
+| `casoBase/run_caso_base_tsp.py` | Pipeline caso base operativo (NN/TSP) con distancia vial, reportes HTML/MD y KPIs configurables | X |
 
 ### Proceso de validación aplicado por el equipo
 
