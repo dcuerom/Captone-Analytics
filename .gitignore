@@ -11,7 +11,8 @@ __pycache__/
 *.json
 venv
 .venv/
-
+Instancia_de_Prueba/
+res_casobase_pruebas/
 Instancias de Prueba VRP/
 .csv
 

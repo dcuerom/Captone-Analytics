@@ -243,7 +243,7 @@ class TDVRPTWProblem(ElementwiseProblem):
                     plantilla_idx, turno_idx, cam_t_salida = get_best_start_shift(cliente_id)
                     ventanas_actual = self.ventanas_salida_turnos[plantilla_idx]
 
-                # Reseteo camión
+                # Reseteo camión - NO avanzamos i, el cliente actual se procesará en el nuevo turno
                 vol_actual = 0.0
                 peso_actual = 0.0
                 t_actual = cam_t_salida
@@ -253,6 +253,9 @@ class TDVRPTWProblem(ElementwiseProblem):
                 cam_t_espera = 0.0
                 cam_t_servicio = 0.0
                 cam_dist = 0.0
+                
+                # Continuamos el loop sin avanzar para procesar el mismo cliente en el nuevo turno
+                continue
         
             # Tránsito hacia cliente
             dist_arco = float(self.matriz_dist.loc[nodo_previo, cliente_id])
@@ -322,6 +325,8 @@ class TDVRPTWProblem(ElementwiseProblem):
             
             ruta_act.append(cliente_id)
             tiempos_llegada[cliente_id] = t_inicio_servicio
+            
+            i += 1  # Solo avanzamos al siguiente cliente si se procesó correctamente
             
         # Regreso del último camión
         t_retorno = t_actual  # t_actual ya incluye el tiempo de atención del último cliente

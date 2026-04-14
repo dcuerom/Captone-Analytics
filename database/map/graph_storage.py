@@ -130,3 +130,5 @@ def download_graph_from_storage(local_filepath: str = "grafo/santiago_routing_gr
 
     print(f"Grafo guardado exitosamente en {local_filepath}.")
     return local_filepath
+    if supabase is None:
+        raise RuntimeError("Cliente Supabase no inicializado. Define SUPABASE_URL y SUPABASE_KEY en .env")
