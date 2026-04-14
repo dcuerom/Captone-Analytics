@@ -4,55 +4,6 @@ import folium
 import pandas as pd
 from typing import Dict, Any, Optional
 
-SANTIAGO_CENTER = (-33.4489, -70.6693)
-SANTIAGO_BOUNDS_SW = (-33.75, -71.05)
-SANTIAGO_BOUNDS_NE = (-33.20, -70.35)
-
-
-def _build_santiago_base_map(zoom_start: int = 11) -> folium.Map:
-    m = folium.Map(
-        location=[SANTIAGO_CENTER[0], SANTIAGO_CENTER[1]],
-        zoom_start=zoom_start,
-        tiles="CartoDB positron",
-        control_scale=True,
-    )
-    # Mantiene el mapa enfocado en RM/Santiago para navegación y zoom inicial.
-    m.fit_bounds([
-        [SANTIAGO_BOUNDS_SW[0], SANTIAGO_BOUNDS_SW[1]],
-        [SANTIAGO_BOUNDS_NE[0], SANTIAGO_BOUNDS_NE[1]],
-    ])
-    return m
-
-
-def _best_edge_coords(G: nx.MultiDiGraph, u: Any, v: Any):
-    edge_data = G.get_edge_data(u, v)
-    if not edge_data:
-        return [(G.nodes[u]['y'], G.nodes[u]['x']), (G.nodes[v]['y'], G.nodes[v]['x'])]
-
-    # MultiDiGraph puede tener múltiples keys; elegimos la arista más corta.
-    best = min(
-        edge_data.values(),
-        key=lambda e: float(e.get("length", float("inf")))
-    )
-    geom = best.get("geometry")
-    if geom is not None:
-        return [(y, x) for x, y in geom.coords]
-
-    return [(G.nodes[u]['y'], G.nodes[u]['x']), (G.nodes[v]['y'], G.nodes[v]['x'])]
-
-
-def _build_route_coords_from_osmnx_path(G: nx.MultiDiGraph, ruta_nodos: list):
-    route_coords = []
-    for u, v in zip(ruta_nodos[:-1], ruta_nodos[1:]):
-        segment = _best_edge_coords(G, u, v)
-        if not segment:
-            continue
-        if route_coords and route_coords[-1] == segment[0]:
-            route_coords.extend(segment[1:])
-        else:
-            route_coords.extend(segment)
-    return route_coords
-
 def plot_network_and_routes(
     G: nx.MultiDiGraph, 
     info_rutas: Optional[Dict[str, Any]] = None, 
@@ -76,7 +27,7 @@ def plot_network_and_routes(
         nodes = ox.graph_to_gdfs(G, edges=False)
         center_lat = nodes['y'].mean()
         center_lng = nodes['x'].mean()
-        m = _build_santiago_base_map(zoom_start=11)
+        m = folium.Map(location=[center_lat, center_lng], zoom_start=11)
         m.save(filepath)
         return
         
@@ -84,9 +35,9 @@ def plot_network_and_routes(
     
     # Calcular centro para el mapa usando el primer nodo de la primera ruta
     first_route_nodes = list_of_routes[0][1]
-    _ = G.nodes[first_route_nodes[0]]['y']
-    _ = G.nodes[first_route_nodes[0]]['x']
-    m = _build_santiago_base_map(zoom_start=11)
+    center_lat = G.nodes[first_route_nodes[0]]['y']
+    center_lng = G.nodes[first_route_nodes[0]]['x']
+    m = folium.Map(location=[center_lat, center_lng], zoom_start=11, tiles="CartoDB positron")
     
     colors = ['red', 'blue', 'green', 'purple', 'orange', 'darkred', 'cadetblue', 'darkpurple', 'pink', 'black']
     
@@ -94,7 +45,21 @@ def plot_network_and_routes(
         color = colors[i % len(colors)]
         
         # Ensamblar las coordenadas geométricas exactas de las aristas recorridas
-        route_coords = _build_route_coords_from_osmnx_path(G, ruta_nodos)
+        route_coords = []
+        for u, v in zip(ruta_nodos[:-1], ruta_nodos[1:]):
+            edge_data = G.get_edge_data(u, v)
+            if edge_data is not None and 0 in edge_data and 'geometry' in edge_data[0]:
+                # Trazo con curvatura real de calle
+                geom = edge_data[0]['geometry']
+                for x, y in geom.coords:
+                    route_coords.append((y, x))
+            else:
+                # Trazo recto en intersecciones mínimas o nodos simplificados
+                lat1, lng1 = G.nodes[u]['y'], G.nodes[u]['x']
+                lat2, lng2 = G.nodes[v]['y'], G.nodes[v]['x']
+                if not route_coords:
+                    route_coords.append((lat1, lng1))
+                route_coords.append((lat2, lng2))
                 
         # Agregar la PolyLine al mapa Folium interactivo
         folium.PolyLine(
@@ -215,8 +180,12 @@ def plot_optimized_routes(
             coord_dict[row['id_nodo']] = (float(row['latitud']), float(row['longitud']))
 
     # Coordenadas del depósito (fallback al centroide de Santiago)
-    depot_coords = coord_dict.get(depot_id, SANTIAGO_CENTER)
-    m = _build_santiago_base_map(zoom_start=12)
+    depot_coords = coord_dict.get(depot_id, (-33.4489, -70.6693))
+
+    center_lat = sum(v[0] for v in coord_dict.values()) / max(len(coord_dict), 1)
+    center_lng = sum(v[1] for v in coord_dict.values()) / max(len(coord_dict), 1)
+
+    m = folium.Map(location=[center_lat, center_lng], zoom_start=13, tiles="CartoDB positron")
 
     colors = ['red', 'blue', 'green', 'purple', 'orange',
               'darkred', 'cadetblue', 'darkpurple', 'pink', 'black']
@@ -240,9 +209,21 @@ def plot_optimized_routes(
             ruta_osmnx = None
             if clave in info_rutas_astar:
                 ruta_osmnx = info_rutas_astar[clave].get('ruta_nodos_osmnx', [])
+            elif clave_inv in info_rutas_astar:
+                ruta_osmnx = list(reversed(info_rutas_astar[clave_inv].get('ruta_nodos_osmnx', [])))
+
             if ruta_osmnx and len(ruta_osmnx) > 1:
                 # Trazar usando geometría real de calles
-                route_coords = _build_route_coords_from_osmnx_path(G, ruta_osmnx)
+                route_coords = []
+                for u, v in zip(ruta_osmnx[:-1], ruta_osmnx[1:]):
+                    edge_data = G.get_edge_data(u, v)
+                    if edge_data and 0 in edge_data and 'geometry' in edge_data[0]:
+                        for x, y in edge_data[0]['geometry'].coords:
+                            route_coords.append((y, x))
+                    else:
+                        if not route_coords:
+                            route_coords.append((G.nodes[u]['y'], G.nodes[u]['x']))
+                        route_coords.append((G.nodes[v]['y'], G.nodes[v]['x']))
 
                 if route_coords:
                     folium.PolyLine(
@@ -319,9 +300,11 @@ def plot_global_flota_interactive(
         return
         
     if depot_coords is None:
-        depot_coords = coord_dict.get(depot_id, SANTIAGO_CENTER)
+        depot_coords = coord_dict.get(depot_id, (-33.4489, -70.6693))
+    center_lat = sum(v[0] for v in coord_dict.values()) / max(len(coord_dict), 1)
+    center_lng = sum(v[1] for v in coord_dict.values()) / max(len(coord_dict), 1)
     
-    m = _build_santiago_base_map(zoom_start=11)
+    m = folium.Map(location=[center_lat, center_lng], zoom_start=12, tiles="CartoDB positron")
     
     colors = ['blue', 'green', 'purple', 'orange', 'darkred', 'cadetblue', 'darkblue', 'pink', 'lightgreen', 'black', 'red']
     
@@ -355,9 +338,20 @@ def plot_global_flota_interactive(
                 ruta_osmnx = None
                 if clave in info_astar:
                     ruta_osmnx = info_astar[clave].get('ruta_nodos_osmnx', [])
+                elif clave_inv in info_astar:
+                    ruta_osmnx = list(reversed(info_astar[clave_inv].get('ruta_nodos_osmnx', [])))
                     
                 if ruta_osmnx and len(ruta_osmnx) > 1:
-                    route_coords = _build_route_coords_from_osmnx_path(G, ruta_osmnx)
+                    route_coords = []
+                    for u, v in zip(ruta_osmnx[:-1], ruta_osmnx[1:]):
+                        edge_data = G.get_edge_data(u, v)
+                        if edge_data and 0 in edge_data and 'geometry' in edge_data[0]:
+                            for x, y in edge_data[0]['geometry'].coords:
+                                route_coords.append((y, x))
+                        else:
+                            if not route_coords:
+                                route_coords.append((G.nodes[u]['y'], G.nodes[u]['x']))
+                            route_coords.append((G.nodes[v]['y'], G.nodes[v]['x']))
                             
                     if route_coords:
                         folium.PolyLine(
