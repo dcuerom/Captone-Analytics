@@ -341,7 +341,8 @@ def asignar_y_reportar(
     # Capacidades totales disponibles (por cada bloque/turno usado)
     cap_vol_por_turno = 3_750_000  # cm3
     cap_peso_por_turno = 803_333.33  # g
-    total_turnos_usados = sum(len(v.bloques) for v in flota if v.bloques)
+    # Cambiamos sum(len(v.bloques) for v in flota) por len(todos_bloques) para incluir turnos adicionales/tercerizados
+    total_turnos_usados = len(todos_bloques)
     cap_vol_total = cap_vol_por_turno * total_turnos_usados if total_turnos_usados > 0 else 1
     cap_peso_total = cap_peso_por_turno * total_turnos_usados if total_turnos_usados > 0 else 1
     
