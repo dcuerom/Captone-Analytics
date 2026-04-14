@@ -17,7 +17,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from ".
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../components/ui/tabs";
 
 export function OptimizationResults() {
-  const { run, orders, loading, error } = useAppData();
+  const { run, orders, loading, error, backendAvailable } = useAppData();
   const [selectedCluster, setSelectedCluster] = useState<string>("all");
   const [selectedVehicle, setSelectedVehicle] = useState<string>("all");
 
@@ -38,9 +38,10 @@ export function OptimizationResults() {
       {/* Header */}
       <div className="flex items-start justify-between">
         <div>
-          <h1 className="text-3xl font-semibold text-slate-900 mb-2">Resultados de Optimización</h1>
-          <p className="text-slate-600">{run.name} - Ejecutado el {run.date}</p>
-          {error && <p className="text-xs text-amber-600 mt-1">Backend no disponible. Verifica python backend/api_server.py y npm run dev.</p>}
+          <h1 className="text-3xl font-semibold text-slate-900 mb-2">Resultados</h1>
+          <p className="text-slate-600">{run.name} · {run.date}</p>
+          {!backendAvailable && <p className="text-xs text-amber-600 mt-1">Backend no disponible. Verifica python backend/api_server.py y npm run dev.</p>}
+          {backendAvailable && error && <p className="text-xs text-slate-500 mt-1">No se pudieron refrescar algunos datos.</p>}
         </div>
         <div className="flex gap-2">
           <Link to="/fleet-map">
@@ -343,7 +344,7 @@ export function OptimizationResults() {
           </CardHeader>
           <CardContent>
             <p className="text-sm text-red-900 mb-3">
-              {run.unassignedOrders} pedido(s) no pudo(eron) ser asignado(s) en esta corrida.
+              {run.unassignedOrders} pedido(s) no pudo(eron) ser asignado(s) para esta fecha.
             </p>
             <div className="space-y-2">
               {orders.filter(o => o.status === 'unassigned').map(order => (

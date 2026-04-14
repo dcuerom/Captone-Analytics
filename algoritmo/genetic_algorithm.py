@@ -286,8 +286,13 @@ def disparar_rutina_ga(
     total_clusters = len(tasks)
 
     resultados_globales = {}
-    max_w = max(1, (os.cpu_count() or 2) // 2)
-    print(f"[PyMoo] Procesamiento paralelo de clÃºsteres con {max_w} workers...")
+    raw_cluster_workers = os.getenv("GA_CLUSTER_WORKERS")
+    try:
+        configured_workers = max(1, int(raw_cluster_workers)) if raw_cluster_workers else 1
+    except Exception:
+        configured_workers = 1
+    max_w = min(total_clusters, configured_workers) if total_clusters > 0 else 1
+    print(f"[PyMoo] OptimizaciÃ³n de clÃºsteres con {max_w} worker(s)...")
     _notify_progress(
         progress_callback,
         "optimizing_clusters",
@@ -297,16 +302,12 @@ def disparar_rutina_ga(
         total_steps=total_clusters,
     )
 
-    with concurrent.futures.ProcessPoolExecutor(max_workers=max_w) as executor:
-        future_to_cluster = {
-            executor.submit(optimizar_pymoo_ga, *task): task[0]
-            for task in tasks
-        }
-        completed_clusters = 0
-        for future in concurrent.futures.as_completed(future_to_cluster):
-            cluster_id = future_to_cluster[future]
+    completed_clusters = 0
+    if max_w <= 1:
+        for task in tasks:
+            cluster_id = task[0]
             try:
-                resultados_globales[cluster_id] = future.result()
+                resultados_globales[cluster_id] = optimizar_pymoo_ga(*task)
                 print(f"[PyMoo] Cluster {cluster_id} finalizado.")
             except Exception as e:
                 print(f"Error procesando {cluster_id}: {e}")
@@ -320,6 +321,29 @@ def disparar_rutina_ga(
                 current_step=completed_clusters,
                 total_steps=total_clusters,
             )
+    else:
+        with concurrent.futures.ProcessPoolExecutor(max_workers=max_w) as executor:
+            future_to_cluster = {
+                executor.submit(optimizar_pymoo_ga, *task): task[0]
+                for task in tasks
+            }
+            for future in concurrent.futures.as_completed(future_to_cluster):
+                cluster_id = future_to_cluster[future]
+                try:
+                    resultados_globales[cluster_id] = future.result()
+                    print(f"[PyMoo] Cluster {cluster_id} finalizado.")
+                except Exception as e:
+                    print(f"Error procesando {cluster_id}: {e}")
+                completed_clusters += 1
+                progress_pct = 60.0 + (30.0 * completed_clusters / max(1, total_clusters))
+                _notify_progress(
+                    progress_callback,
+                    "optimizing_clusters",
+                    f"ClÃºsteres optimizados: {completed_clusters}/{total_clusters}",
+                    progress_pct,
+                    current_step=completed_clusters,
+                    total_steps=total_clusters,
+                )
 
     _notify_progress(progress_callback, "assigning_fleet", "Asignando rutas a la flota global...", 92.0)
 
@@ -363,4 +387,3 @@ def disparar_rutina_ga(
 
 if __name__ == "__main__":
     disparar_rutina_ga()
-

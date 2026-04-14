@@ -1,4 +1,4 @@
-import { createBrowserRouter } from "react-router";
+import { Navigate, createBrowserRouter, useLocation } from "react-router";
 import { MainLayout } from "./components/layout/MainLayout";
 import { Dashboard } from "./pages/Dashboard";
 import { Planning } from "./pages/Planning";
@@ -10,11 +10,26 @@ import { KPIs } from "./pages/KPIs";
 import { Alerts } from "./pages/Alerts";
 import { Exports } from "./pages/Exports";
 import { NotFound } from "./pages/NotFound";
+import { Login } from "./pages/Login";
+import { Users } from "./pages/Users";
+import { useAuth } from "./data/AuthContext";
+
+function ProtectedLayout() {
+  const { isAuthenticated } = useAuth();
+  const location = useLocation();
+
+  if (!isAuthenticated) {
+    return <Navigate to="/login" replace state={{ from: location.pathname }} />;
+  }
+
+  return <MainLayout />;
+}
 
 export const router = createBrowserRouter([
+  { path: "/login", Component: Login },
   {
     path: "/",
-    Component: MainLayout,
+    Component: ProtectedLayout,
     children: [
       { index: true, Component: Dashboard },
       { path: "planning", Component: Planning },
@@ -25,6 +40,7 @@ export const router = createBrowserRouter([
       { path: "kpis", Component: KPIs },
       { path: "alerts", Component: Alerts },
       { path: "exports", Component: Exports },
+      { path: "users", Component: Users },
       { path: "*", Component: NotFound },
     ],
   },

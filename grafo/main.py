@@ -27,6 +27,16 @@ def _process_cluster_routing(c_id, df_cluster, df_depot):
     matriz, info_rutas = calculate_routing_for_day(df_cluster_with_depot, _global_G)
     return c_id, matriz, info_rutas
 
+
+def _resolve_worker_count(env_name: str, default: int = 1) -> int:
+    raw_value = os.getenv(env_name)
+    if raw_value is None or str(raw_value).strip() == "":
+        return max(1, default)
+    try:
+        return max(1, int(raw_value))
+    except Exception:
+        return max(1, default)
+
 def execute_vrp_pipeline(
     input_file: str = 'EDA/df_despacho.csv', 
     depot_address: str = "Santa Elena - Sierra Bella, Santiago, RM, Chile",
@@ -120,26 +130,32 @@ def execute_vrp_pipeline(
     
     import concurrent.futures
     
-    max_workers = max(1, (os.cpu_count() or 2) // 2)
-    print(f"Ejecutando procesamiento paralelo con {max_workers} núcleos (Seguridad RAM activa)...")
-    
-    with concurrent.futures.ProcessPoolExecutor(
-        max_workers=max_workers,
-        initializer=_init_worker,
-        initargs=(G,)
-    ) as executor:
-        # Lanzar tareas sin pasar el Grafo G como argumento (ya está inicializando en el proceso worker)
-        futures = [
-            executor.submit(_process_cluster_routing, c_id, df_cluster, df_depot)
-            for c_id, df_cluster in clusters_dict.items()
-        ]
-        
-        # Recolectar resultados
-        for future in concurrent.futures.as_completed(futures):
-            c_id, matriz, info_rutas = future.result()
-            matrices_por_cluster[c_id] = matriz
-            rutas_por_cluster[c_id] = info_rutas
-            print(f"      [Éxito] Cluster {c_id} procesado.")
+    max_workers = min(len(clusters_dict), _resolve_worker_count("ROUTING_MAX_WORKERS", default=1)) if clusters_dict else 1
+    print(f"Procesamiento de ruteo por cluster con {max_workers} worker(s).")
+
+    if max_workers <= 1:
+        _init_worker(G)
+        for c_id, df_cluster in clusters_dict.items():
+            c_id_out, matriz, info_rutas = _process_cluster_routing(c_id, df_cluster, df_depot)
+            matrices_por_cluster[c_id_out] = matriz
+            rutas_por_cluster[c_id_out] = info_rutas
+            print(f"      [Éxito] Cluster {c_id_out} procesado.")
+    else:
+        with concurrent.futures.ProcessPoolExecutor(
+            max_workers=max_workers,
+            initializer=_init_worker,
+            initargs=(G,)
+        ) as executor:
+            futures = [
+                executor.submit(_process_cluster_routing, c_id, df_cluster, df_depot)
+                for c_id, df_cluster in clusters_dict.items()
+            ]
+
+            for future in concurrent.futures.as_completed(futures):
+                c_id, matriz, info_rutas = future.result()
+                matrices_por_cluster[c_id] = matriz
+                rutas_por_cluster[c_id] = info_rutas
+                print(f"      [Éxito] Cluster {c_id} procesado.")
         
     print("\n=== GENERANDO VISUALIZACIÓN === ")
     try:

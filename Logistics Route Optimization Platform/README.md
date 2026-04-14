@@ -2,6 +2,49 @@
 
 This frontend is connected to the Python backend in this same repository.
 
+## Quick start validated in this branch
+
+From repo root:
+
+```bash
+make venv
+make build
+make dev
+```
+
+Full integration check:
+
+```bash
+make dev-verify
+```
+
+`make dev-verify` validates:
+
+- backend health
+- `/api/v1/data` and `/api/v1/map`
+- Vite proxy on `http://127.0.0.1:5173`
+- frontend + backend startup with the repo `.venv`
+
+## Runtime notes
+
+- The frontend now includes a SaaS demo layer with `login` and `users` screens.
+- This auth layer is front-only and does not modify the backend API contract.
+- Session is stored in `localStorage` for demo continuity while navigating.
+- Optimization and maps still consume the real backend at `/api/v1/*`.
+
+## Graph and optimization worker tuning
+
+The backend now defaults to conservative execution to reduce crashes by memory pressure when loading the Santiago road graph.
+
+Optional environment variables:
+
+```bash
+export ROUTING_MAX_WORKERS=1
+export GA_CLUSTER_WORKERS=1
+```
+
+Increase them only on stronger machines after validating RAM usage.
+
 ## Windows (PowerShell): run frontend + backend
 
 ### 1) Prepare backend environment (repo root)

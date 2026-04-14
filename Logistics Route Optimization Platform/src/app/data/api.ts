@@ -87,6 +87,48 @@ export interface FetchDashboardDataOptions {
 
 const API_BASE_URL = (import.meta as any).env?.VITE_API_BASE_URL ?? '/api/v1';
 
+async function readApiPayload<T>(response: Response): Promise<T> {
+  const raw = await response.text();
+  const trimmed = raw.trim();
+
+  let data: unknown = null;
+  if (trimmed) {
+    try {
+      data = JSON.parse(trimmed);
+    } catch {
+      if (!response.ok) {
+        throw new Error(`Error API ${response.status}: respuesta no JSON del backend`);
+      }
+      throw new Error("Respuesta invalida del backend");
+    }
+  }
+
+  if (!response.ok) {
+    let message =
+      typeof data === "object" && data !== null && "error" in data && typeof (data as { error?: unknown }).error === "string"
+        ? (data as { error: string }).error
+        : `Error API ${response.status}: ${response.statusText || "backend no disponible"}`;
+    const firstRowError =
+      typeof data === "object" &&
+      data !== null &&
+      "errors" in data &&
+      Array.isArray((data as { errors?: Array<{ row?: number; errors?: string[] }> }).errors) &&
+      (data as { errors?: Array<{ row?: number; errors?: string[] }> }).errors![0]
+        ? (data as { errors: Array<{ row?: number; errors?: string[] }> }).errors[0]
+        : null;
+    if (firstRowError) {
+      message += ` Primera fila invalida: ${firstRowError.row ?? "?"} (${(firstRowError.errors ?? []).join(", ")})`;
+    }
+    throw new Error(message);
+  }
+
+  if (data === null) {
+    throw new Error("Respuesta vacia del backend");
+  }
+
+  return data as T;
+}
+
 export async function fetchDashboardData(options?: FetchDashboardDataOptions): Promise<DashboardDataPayload> {
   const params = new URLSearchParams();
   if (options?.runId) {
@@ -104,12 +146,17 @@ export async function fetchDashboardData(options?: FetchDashboardDataOptions): P
     },
   });
 
-  if (!response.ok) {
-    throw new Error(`Error API ${response.status}: ${response.statusText}`);
-  }
+  return readApiPayload<DashboardDataPayload>(response);
+}
 
-  const payload = (await response.json()) as DashboardDataPayload;
-  return payload;
+export async function getBackendHealth(): Promise<{ status: string }> {
+  const response = await fetch(`${API_BASE_URL}/health`, {
+    method: "GET",
+    headers: {
+      Accept: "application/json",
+    },
+  });
+  return readApiPayload<{ status: string }>(response);
 }
 
 export function getBackendMapUrl(): string {
@@ -128,11 +175,7 @@ export async function getPreflightStatus(): Promise<PreflightPayload> {
       Accept: "application/json",
     },
   });
-  const data = await response.json();
-  if (!response.ok) {
-    throw new Error(data?.error ?? `Error API ${response.status}`);
-  }
-  return data as PreflightPayload;
+  return readApiPayload<PreflightPayload>(response);
 }
 
 export async function uploadOrdersCsv(filename: string, csvText: string) {
@@ -148,14 +191,14 @@ export async function uploadOrdersCsv(filename: string, csvText: string) {
     }),
   });
 
-  const data = await response.json();
-  if (!response.ok) {
-    const sampleError = Array.isArray(data?.errors) && data.errors.length > 0
-      ? ` Primera fila invalida: ${data.errors[0]?.row ?? "?"} (${(data.errors[0]?.errors ?? []).join(", ")})`
-      : "";
-    throw new Error((data?.error ?? `Error API ${response.status}`) + sampleError);
-  }
-  return data as { status: string; message: string; rows: number; columns: string[] };
+  return readApiPayload<{
+    status: string;
+    message: string;
+    rows: number;
+    columns: string[];
+    detectedDeliveryDates?: string[];
+    defaultDeliveryDate?: string | null;
+  }>(response);
 }
 
 export async function getOptimizationDefaults(): Promise<OptimizationConfigPayload> {
@@ -165,11 +208,8 @@ export async function getOptimizationDefaults(): Promise<OptimizationConfigPaylo
       Accept: 'application/json',
     },
   });
-  const data = await response.json();
-  if (!response.ok) {
-    throw new Error(data?.error ?? `Error API ${response.status}`);
-  }
-  return data.defaults as OptimizationConfigPayload;
+  const data = await readApiPayload<{ defaults: OptimizationConfigPayload }>(response);
+  return data.defaults;
 }
 
 export async function startOptimization(
@@ -186,11 +226,7 @@ export async function startOptimization(
     body: JSON.stringify({ date, config, runId: options?.runId, depotAddress: options?.depotAddress }),
   });
 
-  const data = await response.json();
-  if (!response.ok) {
-    throw new Error(data?.error ?? `Error API ${response.status}`);
-  }
-  return data as OptimizationStatusPayload;
+  return readApiPayload<OptimizationStatusPayload>(response);
 }
 
 export async function getRoutesGeometry(runId?: string): Promise<RoutesGeometryPayload> {
@@ -199,11 +235,7 @@ export async function getRoutesGeometry(runId?: string): Promise<RoutesGeometryP
     method: 'GET',
     headers: { Accept: 'application/json' },
   });
-  const data = await response.json();
-  if (!response.ok) {
-    throw new Error(data?.error ?? `Error API ${response.status}`);
-  }
-  return data as RoutesGeometryPayload;
+  return readApiPayload<RoutesGeometryPayload>(response);
 }
 
 export async function getOptimizationStatus(): Promise<OptimizationStatusPayload> {
@@ -213,11 +245,7 @@ export async function getOptimizationStatus(): Promise<OptimizationStatusPayload
       Accept: 'application/json',
     },
   });
-  const data = await response.json();
-  if (!response.ok) {
-    throw new Error(data?.error ?? `Error API ${response.status}`);
-  }
-  return data as OptimizationStatusPayload;
+  return readApiPayload<OptimizationStatusPayload>(response);
 }
 
 export function mockDashboardData(): DashboardDataPayload {

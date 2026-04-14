@@ -8,7 +8,7 @@ import { Progress } from "../components/ui/progress";
 
 export function VehicleDetail() {
   const { id } = useParams<{ id: string }>();
-  const { run, orders, fleet, loading, error } = useAppData();
+  const { run, orders, fleet, loading, error, backendAvailable } = useAppData();
 
   if (loading) {
     return <div className="p-8 text-slate-600">Cargando datos de backend...</div>;
@@ -50,7 +50,8 @@ export function VehicleDetail() {
             </span>
           </div>
           <p className="text-slate-600">Detalle de ruta y paradas asignadas</p>
-          {error && <p className="text-xs text-amber-600 mt-1">Backend no disponible. Verifica python backend/api_server.py y npm run dev.</p>}
+          {!backendAvailable && <p className="text-xs text-amber-600 mt-1">Backend no disponible. Verifica python backend/api_server.py y npm run dev.</p>}
+          {backendAvailable && error && <p className="text-xs text-slate-500 mt-1">No se pudieron refrescar algunos datos.</p>}
         </div>
         <Link to="/fleet-map">
           <Button>

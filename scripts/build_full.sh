@@ -8,8 +8,13 @@ if [[ ! -x "$PYTHON_BIN" ]]; then
   PYTHON_BIN="python3"
 fi
 
-echo "[1/3] Compilando backend (Python)..."
-"$PYTHON_BIN" -m compileall -q "$ROOT_DIR/backend"
+echo "[1/3] Compilando backend y pipeline Python..."
+"$PYTHON_BIN" -m compileall -q \
+  "$ROOT_DIR/backend" \
+  "$ROOT_DIR/grafo" \
+  "$ROOT_DIR/algoritmo" \
+  "$ROOT_DIR/gestion_flota" \
+  "$ROOT_DIR/modelo"
 echo "[OK] Backend compilado."
 
 echo "[2/3] Instalando dependencias frontend..."

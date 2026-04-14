@@ -26,7 +26,7 @@ export function FleetMap() {
   const [backendMapError, setBackendMapError] = useState<string | null>(null);
   const [geometry, setGeometry] = useState<RoutesGeometryPayload | null>(null);
   const [geometryError, setGeometryError] = useState<string | null>(null);
-  const { run, orders, loading, error, activeRunId } = useAppData();
+  const { run, orders, loading, error, backendAvailable, activeRunId } = useAppData();
 
   const effectiveRunId = activeRunId ?? run.id;
   const centerLat = geometry?.depot?.coordinates?.[0] ?? -33.4489;
@@ -87,7 +87,8 @@ export function FleetMap() {
             <p className="text-xs text-slate-500 mt-1">
               Run: <code>{effectiveRunId || "sin-run-id"}</code>
             </p>
-            {error && <p className="text-xs text-amber-600 mt-1">Backend no disponible. Verifica python backend/api_server.py y npm run dev.</p>}
+            {!backendAvailable && <p className="text-xs text-amber-600 mt-1">Backend no disponible. Verifica python backend/api_server.py y npm run dev.</p>}
+            {backendAvailable && error && <p className="text-xs text-slate-500 mt-1">No se pudieron refrescar algunos datos.</p>}
             {backendMapError && <p className="text-xs text-amber-600 mt-1">Mapa backend no disponible: {backendMapError}</p>}
             {geometryError && <p className="text-xs text-amber-600 mt-1">Geometria backend no disponible: {geometryError}</p>}
           </div>

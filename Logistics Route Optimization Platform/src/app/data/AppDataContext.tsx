@@ -1,6 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
-import { fetchDashboardData, type FetchDashboardDataOptions } from './api';
+import { fetchDashboardData, getBackendHealth, type FetchDashboardDataOptions } from './api';
 import type { OptimizationRun, Order, Vehicle } from './mockData';
+import { useAuth } from './AuthContext';
 
 interface RefreshOptions extends FetchDashboardDataOptions {
   background?: boolean;
@@ -14,6 +15,7 @@ interface AppDataContextValue {
   activeRunId: string | null;
   loading: boolean;
   error: string | null;
+  backendAvailable: boolean;
   refresh: (options?: RefreshOptions) => Promise<void>;
 }
 
@@ -46,10 +48,12 @@ const AppDataContext = createContext<AppDataContextValue>({
   activeRunId: null,
   loading: true,
   error: null,
+  backendAvailable: true,
   refresh: async () => undefined,
 });
 
 export function AppDataProvider({ children }: { children: ReactNode }) {
+  const { isAuthenticated } = useAuth();
   const [run, setRun] = useState<OptimizationRun>(emptyRun);
   const [orders, setOrders] = useState<Order[]>([]);
   const [fleet, setFleet] = useState<Vehicle[]>([]);
@@ -58,8 +62,15 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
   const [activeDate, setActiveDate] = useState<string | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
+  const [backendAvailable, setBackendAvailable] = useState<boolean>(true);
 
   const refresh = useCallback(async (options?: RefreshOptions) => {
+    if (!isAuthenticated) {
+      setLoading(false);
+      setError(null);
+      setBackendAvailable(true);
+      return;
+    }
     const background = Boolean(options?.background);
     const runId = options?.runId ?? activeRunId ?? undefined;
     const date = options?.date ?? activeDate ?? undefined;
@@ -76,9 +87,16 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
       setActiveRunId(data.optimizationRun?.id ?? runId ?? null);
       setActiveDate(data.optimizationRun?.date ?? date ?? null);
       setError(null);
+      setBackendAvailable(true);
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Error desconocido al cargar datos del backend';
       setError(message);
+      try {
+        const health = await getBackendHealth();
+        setBackendAvailable(health.status === "ok");
+      } catch {
+        setBackendAvailable(false);
+      }
       // Conservamos el último estado válido en memoria.
       // Si no existe estado previo, quedan valores vacíos por defecto.
     } finally {
@@ -86,13 +104,19 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
         setLoading(false);
       }
     }
-  }, [activeDate, activeRunId]);
+  }, [activeDate, activeRunId, isAuthenticated]);
 
   useEffect(() => {
+    if (!isAuthenticated) {
+      return;
+    }
     void refresh({ background: false });
-  }, [refresh]);
+  }, [isAuthenticated, refresh]);
 
   useEffect(() => {
+    if (!isAuthenticated) {
+      return;
+    }
     const onFocus = () => {
       void refresh({ background: true });
     };
@@ -101,11 +125,11 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
     return () => {
       window.removeEventListener('focus', onFocus);
     };
-  }, [refresh]);
+  }, [isAuthenticated, refresh]);
 
   const value = useMemo(
-    () => ({ run, orders, fleet, historicalRuns, activeRunId, loading, error, refresh }),
-    [run, orders, fleet, historicalRuns, activeRunId, loading, error, refresh],
+    () => ({ run, orders, fleet, historicalRuns, activeRunId, loading, error, backendAvailable, refresh }),
+    [run, orders, fleet, historicalRuns, activeRunId, loading, error, backendAvailable, refresh],
   );
 
   return <AppDataContext.Provider value={value}>{children}</AppDataContext.Provider>;

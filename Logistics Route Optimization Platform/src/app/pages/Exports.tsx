@@ -6,7 +6,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "../components/ui/tabs"
 import { StatusBadge } from "../components/shared/StatusBadge";
 
 export function Exports() {
-  const { run, historicalRuns, loading, error } = useAppData();
+  const { run, historicalRuns, loading, error, backendAvailable } = useAppData();
 
   if (loading) {
     return <div className="p-8 text-slate-600">Cargando datos de backend...</div>;
@@ -22,7 +22,8 @@ export function Exports() {
       <div>
         <h1 className="text-3xl font-semibold text-slate-900 mb-2">Exportación y Trazabilidad</h1>
         <p className="text-slate-600">Descargue resultados y audite el historial de optimizaciones</p>
-        {error && <p className="text-xs text-amber-600 mt-1">Backend no disponible. Verifica python backend/api_server.py y npm run dev.</p>}
+        {!backendAvailable && <p className="text-xs text-amber-600 mt-1">Backend no disponible. Verifica python backend/api_server.py y npm run dev.</p>}
+        {backendAvailable && error && <p className="text-xs text-slate-500 mt-1">No se pudieron refrescar algunos datos.</p>}
       </div>
 
       <Tabs defaultValue="exports">

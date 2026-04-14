@@ -16,6 +16,91 @@ import sys
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from grafo.visualizer import plot_global_flota_interactive
 
+
+def _append_segment(route_coords: List[List[float]], segment_coords: List[List[float]]) -> None:
+    if not segment_coords:
+        return
+    if route_coords and route_coords[-1] == segment_coords[0]:
+        route_coords.extend(segment_coords[1:])
+        return
+    route_coords.extend(segment_coords)
+
+
+def _coords_from_osmnx_path(path_nodes: List[Any], G: Optional[nx.MultiDiGraph]) -> List[List[float]]:
+    if G is None or len(path_nodes) < 2:
+        return []
+
+    coords: List[List[float]] = []
+    for u, v in zip(path_nodes[:-1], path_nodes[1:]):
+        edge_bundle = G.get_edge_data(u, v)
+        edge = next(iter(edge_bundle.values())) if edge_bundle else None
+        if edge and "geometry" in edge:
+            segment = [[float(y), float(x)] for x, y in edge["geometry"].coords]
+        else:
+            segment = []
+            if u in G.nodes:
+                segment.append([float(G.nodes[u]["y"]), float(G.nodes[u]["x"])])
+            if v in G.nodes:
+                segment.append([float(G.nodes[v]["y"]), float(G.nodes[v]["x"])])
+        _append_segment(coords, segment)
+    return coords
+
+
+def _fallback_segment(
+    origin_id: str,
+    destination_id: str,
+    coord_lookup: Dict[str, List[float]],
+    depot_id: str,
+    depot_coords: Optional[Any],
+) -> List[List[float]]:
+    if origin_id == depot_id and depot_coords:
+        origin_coords = [float(depot_coords[0]), float(depot_coords[1])]
+    else:
+        origin_coords = coord_lookup.get(origin_id)
+
+    if destination_id == depot_id and depot_coords:
+        destination_coords = [float(depot_coords[0]), float(depot_coords[1])]
+    else:
+        destination_coords = coord_lookup.get(destination_id)
+
+    segment: List[List[float]] = []
+    if origin_coords:
+        segment.append([float(origin_coords[0]), float(origin_coords[1])])
+    if destination_coords:
+        segment.append([float(destination_coords[0]), float(destination_coords[1])])
+    return segment
+
+
+def _build_route_geometry(
+    stop_ids: List[str],
+    cluster_id: Any,
+    depot_id: str,
+    rutas_dict_global: Optional[Dict[Any, Dict[str, Any]]],
+    G: Optional[nx.MultiDiGraph],
+    coord_lookup: Dict[str, List[float]],
+    depot_coords: Optional[Any],
+) -> List[List[float]]:
+    route_coords: List[List[float]] = []
+    route_catalog = rutas_dict_global.get(cluster_id, {}) if isinstance(rutas_dict_global, dict) else {}
+    sequence = [depot_id] + stop_ids + [depot_id]
+
+    for origin_id, destination_id in zip(sequence[:-1], sequence[1:]):
+        direct_key = f"{origin_id}->{destination_id}"
+        reverse_key = f"{destination_id}->{origin_id}"
+
+        path_nodes: List[Any] = []
+        if direct_key in route_catalog:
+            path_nodes = list(route_catalog[direct_key].get("ruta_nodos_osmnx", []) or [])
+        elif reverse_key in route_catalog:
+            path_nodes = list(reversed(route_catalog[reverse_key].get("ruta_nodos_osmnx", []) or []))
+
+        segment_coords = _coords_from_osmnx_path(path_nodes, G)
+        if not segment_coords:
+            segment_coords = _fallback_segment(origin_id, destination_id, coord_lookup, depot_id, depot_coords)
+        _append_segment(route_coords, segment_coords)
+
+    return route_coords
+
 class BloqueRuta:
     def __init__(self, cluster_id, ruta, detalle_camion, idx_en_cluster):
         self.cluster_id = cluster_id
@@ -530,12 +615,15 @@ def asignar_y_reportar(
             continue
         for block_idx, b in enumerate(vehiculo.bloques):
             stop_ids = [n for n in b.ruta if n in coord_lookup]
-            coords: List[List[float]] = []
-            if depot_coords:
-                coords.append([float(depot_coords[0]), float(depot_coords[1])])
-            coords.extend([coord_lookup[n] for n in stop_ids])
-            if depot_coords:
-                coords.append([float(depot_coords[0]), float(depot_coords[1])])
+            coords = _build_route_geometry(
+                stop_ids=stop_ids,
+                cluster_id=b.cluster_id,
+                depot_id=depot_id,
+                rutas_dict_global=rutas_dict_global,
+                G=G,
+                coord_lookup=coord_lookup,
+                depot_coords=depot_coords,
+            )
             route_features.append(
                 {
                     "vehicleId": f"V{int(vehiculo.id_vehiculo):03d}",
@@ -604,4 +692,3 @@ def asignar_y_reportar(
         json.dump(metadata_payload, f_meta, ensure_ascii=False, indent=2)
 
     return df_resumen, df_detalle
-

@@ -222,6 +222,12 @@ def _normalize_uploaded_orders(df_in: pd.DataFrame) -> pd.DataFrame:
         df["longitud"] = None
     df["latitud"] = pd.to_numeric(df["latitud"], errors="coerce")
     df["longitud"] = pd.to_numeric(df["longitud"], errors="coerce")
+    invalid_lat_mask = df["latitud"].notna() & ((df["latitud"] < -90) | (df["latitud"] > 90))
+    invalid_lng_mask = df["longitud"].notna() & ((df["longitud"] < -180) | (df["longitud"] > 180))
+    if invalid_lat_mask.any():
+        df.loc[invalid_lat_mask, "latitud"] = pd.NA
+    if invalid_lng_mask.any():
+        df.loc[invalid_lng_mask, "longitud"] = pd.NA
 
     if "fecha_entrega" not in df.columns:
         df["fecha_entrega"] = now_date
@@ -364,6 +370,15 @@ def _read_csv(path: Path) -> pd.DataFrame:
 
 def _utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def _sorted_delivery_dates(df: pd.DataFrame) -> List[str]:
+    if "fecha_entrega" not in df.columns:
+        return []
+    parsed = pd.to_datetime(df["fecha_entrega"], errors="coerce").dropna()
+    if parsed.empty:
+        return []
+    return sorted({value.strftime("%Y-%m-%d") for value in parsed})
 
 
 def _new_run_id() -> str:
@@ -1099,15 +1114,23 @@ class Handler(BaseHTTPRequestHandler):
 
             validation_errors = _validate_normalized_orders(df)
             if validation_errors:
-                missing_coords = [
+                invalid_coords = [
                     err
                     for err in validation_errors
-                    if any("latitud/longitud faltantes" in str(msg) for msg in err.get("errors", []))
+                    if any(
+                        coord_msg in str(msg)
+                        for msg in err.get("errors", [])
+                        for coord_msg in (
+                            "latitud/longitud faltantes",
+                            "latitud fuera de rango [-90,90]",
+                            "longitud fuera de rango [-180,180]",
+                        )
+                    )
                 ]
 
                 geocode_attempted = False
                 geocode_filled = 0
-                if missing_coords and "direccion_ruteo" in df.columns:
+                if invalid_coords and "direccion_ruteo" in df.columns:
                     non_empty_addr = df["direccion_ruteo"].astype(str).str.strip().ne("").sum()
                     if non_empty_addr > 0:
                         try:
@@ -1146,6 +1169,7 @@ class Handler(BaseHTTPRequestHandler):
 
             EDA_PATH.parent.mkdir(parents=True, exist_ok=True)
             df.to_csv(EDA_PATH, index=False, encoding="utf-8-sig")
+            detected_dates = _sorted_delivery_dates(df)
 
             self._set_headers(200)
             self.wfile.write(
@@ -1156,6 +1180,8 @@ class Handler(BaseHTTPRequestHandler):
                         "filename": filename,
                         "rows": int(len(df)),
                         "columns": list(df.columns),
+                        "detectedDeliveryDates": detected_dates,
+                        "defaultDeliveryDate": detected_dates[0] if detected_dates else None,
                         "schemaVersion": API_SCHEMA_VERSION,
                         "saved_to": str(EDA_PATH),
                     },
@@ -1182,4 +1208,3 @@ def run_server(host: str = "127.0.0.1", port: int = 8000) -> None:
 
 if __name__ == "__main__":
     run_server()
-

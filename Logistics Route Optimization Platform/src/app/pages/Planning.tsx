@@ -31,7 +31,7 @@ export function Planning() {
   const [optimizationStageMessage, setOptimizationStageMessage] = useState<string | null>(null);
   const [optimizationStepCurrent, setOptimizationStepCurrent] = useState<number | null>(null);
   const [optimizationStepTotal, setOptimizationStepTotal] = useState<number | null>(null);
-  const { fleet, orders, loading, error, refresh, activeRunId } = useAppData();
+  const { fleet, orders, loading, error, backendAvailable, refresh, activeRunId } = useAppData();
 
   useEffect(() => {
     const loadDefaults = async () => {
@@ -72,9 +72,9 @@ export function Planning() {
       const generatedRunId = `run-${new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14)}-${Math.random().toString(16).slice(2, 10)}`;
       setIsOptimizing(true);
       setOptimizationError(null);
-      setOptimizationMessage("Iniciando optimizacion en backend...");
+      setOptimizationMessage("Iniciando proceso...");
       setOptimizationProgressPct(0);
-      setOptimizationStageMessage("Preparando optimizacion...");
+      setOptimizationStageMessage("Preparando proceso...");
       setOptimizationStepCurrent(null);
       setOptimizationStepTotal(null);
       setLatestRunId(generatedRunId);
@@ -126,8 +126,8 @@ export function Planning() {
               ? Math.max(0, Math.min(100, Number(status.progressPct)))
               : optimizationProgressPct;
           setOptimizationProgressPct(nextProgress);
-          setOptimizationMessage(status.stageMessage ?? "Optimizando rutas con modelo TDVRPTW...");
-          setOptimizationStageMessage(status.stageMessage ?? "Procesando optimizacion...");
+          setOptimizationMessage(status.stageMessage ?? "Procesando...");
+          setOptimizationStageMessage(status.stageMessage ?? "Procesando...");
           if (typeof status.currentStep === "number") {
             setOptimizationStepCurrent(status.currentStep);
           }
@@ -141,10 +141,10 @@ export function Planning() {
           const completedRunId = status.runId ?? latestRunId ?? generatedRunId;
           setLatestRunId(completedRunId);
           setOptimizationProgressPct(100);
-          setOptimizationMessage("Optimizacion completada. Actualizando resultados...");
-          setOptimizationStageMessage(status.stageMessage ?? "Optimizacion finalizada.");
+          setOptimizationMessage("Fecha procesada. Actualizando resultados...");
+          setOptimizationStageMessage(status.stageMessage ?? "Optimización finalizada.");
           await refresh({ runId: completedRunId });
-          setOptimizationMessage("Resultados actualizados desde backend.");
+          setOptimizationMessage("Resultados actualizados.");
           setIsOptimizing(false);
           return;
         }
@@ -175,7 +175,14 @@ export function Planning() {
       setUploadMessage(null);
       const csvText = await selectedFile.text();
       const result = await uploadOrdersCsv(selectedFile.name, csvText);
-      setUploadMessage(`CSV cargado: ${result.rows} filas (${result.columns.length} columnas).`);
+      if (result.defaultDeliveryDate) {
+        setDeliveryDate(result.defaultDeliveryDate);
+      }
+      setUploadMessage(
+        result.defaultDeliveryDate
+          ? `CSV cargado: ${result.rows} filas. Fecha a Entregar: ${result.defaultDeliveryDate}.`
+          : `CSV cargado: ${result.rows} filas (${result.columns.length} columnas).`,
+      );
       await refresh({ runId: activeRunId ?? undefined });
     } catch (err) {
       const message = err instanceof Error ? err.message : "No se pudo cargar el CSV.";
@@ -194,17 +201,18 @@ export function Planning() {
   return (
     <div className="p-8 space-y-6">
       <div>
-        <h1 className="text-3xl font-semibold text-slate-900 mb-2">Planificacion de Corrida</h1>
-        <p className="text-slate-600">Configure y ejecute una nueva optimizacion de rutas TDVRPTW</p>
-        {error && (
+        <h1 className="text-3xl font-semibold text-slate-900 mb-2">Fecha a Entregar</h1>
+        <p className="text-slate-600">Configura parámetros y ejecuta el modelo</p>
+        {!backendAvailable && (
           <p className="text-xs text-amber-700 mt-1">
             Backend no disponible. Verifica <code>python backend/api_server.py</code> y <code>npm run dev</code>.
           </p>
         )}
+        {backendAvailable && error && <p className="text-xs text-slate-500 mt-1">No se pudieron refrescar algunos datos.</p>}
         {preflightSummary && <p className="text-xs text-slate-600 mt-1">{preflightSummary}</p>}
         {(latestRunId || activeRunId) && (
           <p className="text-xs text-slate-600 mt-1">
-            Run activo: <code>{latestRunId ?? activeRunId}</code>
+            Última ejecución: <code>{latestRunId ?? activeRunId}</code>
           </p>
         )}
         {optimizationMessage && <p className="text-xs text-blue-700 mt-1">{optimizationMessage}</p>}
@@ -248,7 +256,7 @@ export function Planning() {
                     <Label htmlFor="depot-address">Direccion de Deposito</Label>
                     <Input id="depot-address" type="text" value={depotAddress} onChange={(e) => setDepotAddress(e.target.value)} />
                     <p className="text-xs text-slate-500 mt-1">
-                      Se envia al backend como <code>depotAddress</code> en la corrida.
+                      Dirección operativa del depósito.
                     </p>
                   </div>
 
@@ -267,15 +275,15 @@ export function Planning() {
                       </Button>
                     </div>
                     <p className="text-xs text-slate-500 mt-1">
-                      Formato recomendado (modelo real): id_pedido,id_cliente,direccion_ruteo,Comuna,latitud,longitud,fecha_entrega,a_ventana,b_ventana,peso_pedido,volumen_pedido
+                      Campos base: id_pedido, id_cliente, direccion_ruteo, Comuna, latitud, longitud, fecha_entrega, a_ventana, b_ventana, peso_pedido, volumen_pedido
                     </p>
                     {uploadMessage && <p className="text-xs text-green-700 mt-1">{uploadMessage}</p>}
                     {uploadError && <p className="text-xs text-red-700 mt-1">{uploadError}</p>}
                   </div>
 
                   <div className="rounded-md border border-slate-200 bg-slate-50 p-3">
-                    <p className="text-sm font-medium text-slate-900">Objetivo activo: Minimizar distancia total</p>
-                    <p className="text-xs text-slate-600 mt-1">La version actual del backend opera con este objetivo.</p>
+                    <p className="text-sm font-medium text-slate-900">Objetivo activo: distancia total</p>
+                    <p className="text-xs text-slate-600 mt-1">Función objetivo fija para esta versión.</p>
                   </div>
                 </TabsContent>
 
@@ -290,7 +298,7 @@ export function Planning() {
                         step="0.1"
                         onChange={(e) => setClusteringEps(Number(e.target.value))}
                       />
-                      <p className="text-xs text-slate-500 mt-1">DBSCAN de produccion (espacio lat/lon/tiempo estandarizado)</p>
+                      <p className="text-xs text-slate-500 mt-1">Control de densidad para clustering.</p>
                     </div>
                     <div>
                       <Label htmlFor="clustering-min-samples">Min Samples</Label>
@@ -300,7 +308,7 @@ export function Planning() {
                         value={clusteringMinSamples}
                         onChange={(e) => setClusteringMinSamples(Number(e.target.value))}
                       />
-                      <p className="text-xs text-slate-500 mt-1">Minimo de nodos por cluster (pipeline actual)</p>
+                      <p className="text-xs text-slate-500 mt-1">Mínimo de pedidos por clúster.</p>
                     </div>
                   </div>
 
@@ -351,7 +359,7 @@ export function Planning() {
               ) : (
                 <>
                   <Play className="size-5 mr-2" />
-                  Ejecutar Optimizacion
+                  Ejecutar modelo
                 </>
               )}
             </Button>
@@ -424,15 +432,15 @@ export function Planning() {
 
           <Card className="bg-blue-50 border-blue-200">
             <CardContent className="p-4">
-              <h4 className="font-medium text-blue-900 mb-2">Pipeline Backend</h4>
+              <h4 className="font-medium text-blue-900 mb-2">Pipeline</h4>
               <ol className="text-xs text-blue-800 space-y-1">
-                <li>1. Ingesta y validacion de pedidos</li>
-                <li>2. Geocodificacion de direcciones</li>
-                <li>3. Clustering DBSCAN 3D (lat,lon,tiempo)</li>
-                <li>4. Matriz de distancias sobre red vial real (A*/Dijkstra)</li>
-                <li>5. Optimizacion TDVRPTW (PyMoo + restricciones duras)</li>
-                <li>6. Asignacion global de flota</li>
-                <li>7. Exportacion de resultados</li>
+                <li>1. Ingesta</li>
+                <li>2. Geocodificación</li>
+                <li>3. Clustering</li>
+                <li>4. Matriz vial</li>
+                <li>5. Optimización</li>
+                <li>6. Asignación de flota</li>
+                <li>7. Exportación</li>
               </ol>
             </CardContent>
           </Card>

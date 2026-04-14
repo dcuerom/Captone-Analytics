@@ -23,7 +23,7 @@ import { TrendingUp, TrendingDown, Calendar, ArrowRight } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../components/ui/tabs";
 
 export function KPIs() {
-  const { historicalRuns, loading, error } = useAppData();
+  const { historicalRuns, loading, error, backendAvailable } = useAppData();
   const runs = historicalRuns.length >= 2 ? historicalRuns : historicalRuns.concat(historicalRuns[0] ? [historicalRuns[0]] : []);
   const [compareRuns, setCompareRuns] = useState([
     runs[0]?.id ?? "",
@@ -48,7 +48,7 @@ export function KPIs() {
   const run1 = runs.find(r => r.id === compareRuns[0]) ?? runs[0];
   const run2 = runs.find(r => r.id === compareRuns[1]) ?? runs[0];
   if (!run1 || !run2) {
-    return <div className="p-8 text-slate-600">No hay corridas históricas disponibles.</div>;
+    return <div className="p-8 text-slate-600">No hay fechas históricas disponibles.</div>;
   }
 
   const comparisonData = [
@@ -118,7 +118,8 @@ export function KPIs() {
       <div>
         <h1 className="text-3xl font-semibold text-slate-900 mb-2">KPIs y Análisis Comparativo</h1>
         <p className="text-slate-600">Seguimiento de métricas operativas y comparación de escenarios</p>
-        {error && <p className="text-xs text-amber-600 mt-1">Backend no disponible. Verifica python backend/api_server.py y npm run dev.</p>}
+        {!backendAvailable && <p className="text-xs text-amber-600 mt-1">Backend no disponible. Verifica python backend/api_server.py y npm run dev.</p>}
+        {backendAvailable && error && <p className="text-xs text-slate-500 mt-1">No se pudieron refrescar algunos datos.</p>}
       </div>
 
       <Tabs defaultValue="trends">

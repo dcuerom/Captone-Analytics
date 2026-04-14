@@ -29,7 +29,7 @@ import {
 } from "recharts";
 
 export function Dashboard() {
-  const { run, fleet, loading, error } = useAppData();
+  const { run, fleet, loading, error, backendAvailable } = useAppData();
   const availableFleet = fleet.filter(v => v.available).length;
 
   if (loading) {
@@ -53,8 +53,9 @@ export function Dashboard() {
       {/* Header */}
       <div>
         <h1 className="text-3xl font-semibold text-slate-900 mb-2">Dashboard Ejecutivo</h1>
-        <p className="text-slate-600">Resumen operativo y KPIs principales de optimización de rutas</p>
-        {error && <p className="text-xs text-amber-600 mt-1">Backend no disponible. Verifica python backend/api_server.py y npm run dev.</p>}
+        <p className="text-slate-600">Resumen operativo</p>
+        {!backendAvailable && <p className="text-xs text-amber-600 mt-1">Backend no disponible. Verifica python backend/api_server.py y npm run dev.</p>}
+        {backendAvailable && error && <p className="text-xs text-slate-500 mt-1">No se pudieron refrescar algunos datos.</p>}
       </div>
 
       {/* Run Status Alert */}
@@ -64,13 +65,13 @@ export function Dashboard() {
             <div className="flex items-start gap-3">
               <CheckCircle2 className="size-5 text-green-600 mt-0.5" />
               <div>
-                <h3 className="font-medium text-green-900">Corrida completada exitosamente</h3>
+                <h3 className="font-medium text-green-900">Corrida completada</h3>
                 <p className="text-sm text-green-700 mt-1">
                   {run.name} - Ejecutada en {run.executionTimeSeconds}s
                 </p>
                 {run.warnings.length > 0 && (
                   <p className="text-sm text-green-700 mt-2">
-                    ⚠️ {run.warnings.length} advertencias detectadas
+                    {run.warnings.length} advertencias registradas
                   </p>
                 )}
               </div>

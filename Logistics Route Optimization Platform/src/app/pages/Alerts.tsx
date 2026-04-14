@@ -21,7 +21,7 @@ export function Alerts() {
   const [filterType, setFilterType] = useState<string>("all");
   const [filterCategory, setFilterCategory] = useState<string>("all");
 
-  const { run, orders, loading, error } = useAppData();
+  const { run, orders, loading, error, backendAvailable } = useAppData();
   if (loading) {
     return <div className="p-8 text-slate-600">Cargando datos de backend...</div>;
   }
@@ -149,7 +149,8 @@ export function Alerts() {
       <div>
         <h1 className="text-3xl font-semibold text-slate-900 mb-2">Alertas y Excepciones Operativas</h1>
         <p className="text-slate-600">Monitor de advertencias, violaciones y oportunidades de mejora</p>
-        {error && <p className="text-xs text-amber-600 mt-1">Backend no disponible. Verifica python backend/api_server.py y npm run dev.</p>}
+        {!backendAvailable && <p className="text-xs text-amber-600 mt-1">Backend no disponible. Verifica python backend/api_server.py y npm run dev.</p>}
+        {backendAvailable && error && <p className="text-xs text-slate-500 mt-1">No se pudieron refrescar algunos datos.</p>}
       </div>
 
       {/* Summary Cards */}
