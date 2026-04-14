@@ -1,23 +1,47 @@
 # 🧠 Módulo `algoritmo/` — Metaheurísticas VRP
 
-Esta carpeta conforma la capa superior de orquestación y optimización metaheurística del proyecto. Su rol dentro del pipeline general es servir de "cerebro" para encontrar soluciones casi-óptimas al problema complejo NP-Hard del ruteo de vehículos (VRPTW).
+Esta carpeta conforma la capa superior de orquestación y optimización metaheurística del proyecto. Su rol dentro del pipeline general es servir de "cerebro" para encontrar soluciones casi-óptimas al problema complejo NP-Hard del ruteo de vehículos con ventanas de tiempo dependientes del tiempo (TDVRPTW).
 
-## Archivos y su Contribución al Pipeline
+## Arquitectura de la Solución
 
-### `genetic_algorithm.py`
-**Rol:** Es el orquestador principal del proyecto y el punto real de entrada a todo el ecosistema.
-**Contribución en detalle:**
-1. **Punto de Inyección:** Carga los datos base crudos del negocio desde `DatosSimulados/df_despacho.csv`.
-2. **Orquestador Espacial:** Llama internamente a `execute_vrp_pipeline()` del módulo abstracto `grafo/` para transformar las direcciones en coordenadas, agrupar a los clientes (DBSCAN) y obtener una matriz asimétrica calculada sobre las calles de Santiago.
-3. **El Motor Genético:** Instancia y ejecuta un Algoritmo Genético (GA) mediante la librería `pymoo`. Utiliza cromosomas basados en permutación (`PermutationRandomSampling`, `OrderCrossover`) sobre poblaciones de individuos. Castiga penalizaciones fuertemente gracias a las funciones internas definidas en el módulo `modelo/`.
-4. **Despacho Logístico:** Una vez resuelto a nivel de cluster, delega el rompecabezas de turnos al módulo `gestion_flota/` llamando a `asignar_y_reportar()`.
+La lógica de resolución no se basa en un simple algoritmo, sino en una arquitectura híbrida de varias capas:
 
-### `ga_vrp.py`
-**Rol:** Esquema prototipo bi-objetivo (NSGA2).
-**Contribución en detalle:**
-Actúa como un artefacto semilla de investigación o Prueba de Concepto (POC) enfocado en optimizaciones multi-objetivo vía NSGA-II. Permite la instanciación de algoritmos genéticos más limpios, sin todo el acoplamiento logístico del archivo principal. Si bien actualmente todo está unificado en `genetic_algorithm.py`, este archivo sirve para experimentación pura con operadores de cruce (SBX) y mutación (PM).
+### 1. Inicialización Heurística (Semilla)
+Antes de iniciar la evolución, el sistema utiliza la **Heurística de Ahorros de Clarke-Wright** (`savings.py`). Esto genera una solución inicial razonable basada en la cercanía y ahorro de distancia, la cual se inyecta en la población inicial del Algoritmo Genético para acelerar la convergencia hacia zonas de alta calidad.
+
+### 2. Motor de Evolución (Algoritmo Genético)
+Utilizamos la librería **PyMoo** para ejecutar un GA basado en permutaciones:
+- **Cromosoma:** Una secuencia de IDs de clientes.
+- **Sampling:** `SavingsSeededSampling` (Mezcla de semilla Clarke-Wright + aleatoriedad).
+- **Cruce (Crossover):** `OrderCrossover (OX)`, diseñado para mantener la estructura de secuencias en problemas de ruteo.
+- **Mutación:** `InversionMutation`, que invierte sub-secuencias para explorar nuevas rutas.
+
+### 3. Decodificador Greedy Split (Evaluación)
+Para transformar una secuencia de clientes en métricas reales (`F` y `G` de PyMoo), el evaluador en `modelo/pymoo_problem.py` realiza un recorrido voraz:
+- **Agrupación en Rutas:** Lee los clientes uno por uno y los asigna a un camión. Si se supera la capacidad volumétrica, de peso, o el tiempo máximo de conducción (300 min), el camión retorna a la base y se inicia una nueva ruta.
+- **Dependencia del Tiempo:** Cada traslado calcula su duración asimétrica basándose en la hora exacta de salida mediante el módulo de tráfico.
+
+### 4. Optimización Dinámica de Salida (Novedad)
+A diferencia de modelos rígidos donde los camiones salen a una hora fija, este motor incluye **Elección Dinámica del Tiempo de Salida**:
+- Al cerrar cada ruta, el evaluador realiza un muestreo de salida cada 15 minutos dentro de la ventana permitida del turno (ej. [09:00 - 12:00]).
+- Se selecciona automáticamente el minuto de salida que minimice el costo combinado de combustible y penalización por tiempo de espera del conductor.
+
+### 5. Procesamiento Paralelo
+Dado que Santiago se divide en múltiples clústeres, el sistema utiliza un `ProcessPoolExecutor` para lanzar optimizaciones independientes en todos los núcleos del procesador disponibles, permitiendo resolver toda la ciudad en minutos.
+
+---
+
+## Archivos Principales
+
+- **`genetic_algorithm.py`**: El orquestador que une la geocodificación, el clustering, las matrices A* y el GA.
+- **`savings.py`**: Implementación de la heurística de ahorros para seeding.
+- **`ga_vrp.py`**: Entorno de experimentación para modelos multi-objetivo (NSGA-II).
 
 ---
 
 ## Flujo de Trabajo (Resumen)
-El algoritmo contenido acá no calcula el asfalto (eso lo hace `grafo/`) ni impone restricciones matemáticas rígidas en abstracto (eso es trabajo de `modelo/`), simplemente "hace evolucionar" cientos de secuencias de viaje por iteraciones buscando aquella que tenga menores penalizaciones y menor distancia de calle acumulada, despachando su resultado final a la capa de `gestion_flota/`.
+1. **Datos:** Carga de pedidos y geocodificación.
+2. **Espacio:** Generación de matriz de distancias real sobre grafo vial.
+3. **Evolución:** El GA genera permutaciones.
+4. **Rescate:** `_optimizar_salida_ruta` ajusta los tiempos de salida de cada camión.
+5. **Reporte:** El `Gestor Flota` consolida los viajes en vehículos físicos reales.

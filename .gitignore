@@ -4,10 +4,15 @@ cache
 grafo/santiago_routing_graph.graphml
 EDA/Geodatos/
 *.ipynb
-__pycache__
+__pycache__/
+**/__pycache__/
+*.pyc
 *.html
 *.json
 venv
 .venv/
 
 Instancias de Prueba VRP/
+.csv
+
+

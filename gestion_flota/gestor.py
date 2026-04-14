@@ -1,16 +1,17 @@
-"""
+﻿"""
 gestion_flota/gestor.py
 
-Orquestador Global de Vehículos.
-Recibe los diccionarios de resultados optimizados de cada clúster y los redistribuye inter-cluster
-para optimizar la utilización de una Flota Fija Global mediante asignación de turnos multiplexados.
+Orquestador Global de VehÃ­culos.
+Recibe los diccionarios de resultados optimizados de cada clÃºster y los redistribuye inter-cluster
+para optimizar la utilizaciÃ³n de una Flota Fija Global mediante asignaciÃ³n de turnos multiplexados.
 """
 
+import json
 import os
 import datetime
 import pandas as pd
 import networkx as nx
-from typing import Optional
+from typing import Any, Dict, List, Optional
 import sys
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from grafo.visualizer import plot_global_flota_interactive
@@ -30,7 +31,7 @@ class VehiculoGlobal:
     def __init__(self, id_vehiculo):
         self.id_vehiculo = id_vehiculo
         self.bloques = []
-        self.plantilla_base = None # Almacenará 'K1' o 'K2' para forzar homogeneidad
+        self.plantilla_base = None # AlmacenarÃ¡ 'K1' o 'K2' para forzar homogeneidad
         
     def puede_absorber(self, bloque: BloqueRuta) -> bool:
         # Extraemos el prefijo de la plantilla (ej: 'K1' de 'K11')
@@ -40,12 +41,18 @@ class VehiculoGlobal:
         if self.plantilla_base is not None and tipo_k is not None:
             if self.plantilla_base != tipo_k:
                 return False
+
+        # 2. Regla de unicidad de jornada (No repetir K11, K12, etc. en el mismo vehÃ­culo)
+        for b_asignado in self.bloques:
+            if b_asignado.subc_k == bloque.subc_k:
+                return False
                 
-        # 2. Regla física temporal de superposición
+        # 3. Regla fÃ­sica temporal de superposiciÃ³n
         if not self.bloques:
             return True
         ultimo = self.bloques[-1]
-        return bloque.t_salida >= ultimo.t_retorno
+        # RESTRICCIÃ“N 21: Garantizar 120 min de descanso entre jornadas
+        return bloque.t_salida >= ultimo.t_retorno + 120.0
         
     def asignar(self, bloque: BloqueRuta):
         if self.plantilla_base is None:
@@ -56,28 +63,39 @@ class VehiculoGlobal:
 
 
 def asignar_y_reportar(
-    resultados_clusters, 
-    max_vehiculos, 
-    df_filtro, 
-    depot_id, 
-    fecha_target, 
-    tipo_algoritmo="Genético PyMoo", 
+    resultados_clusters,
+    max_vehiculos,
+    df_filtro,
+    depot_id,
+    fecha_target,
+    run_id: Optional[str] = None,
+    config_snapshot: Optional[Dict[str, Any]] = None,
+    source_csv: Optional[str] = None,
+    graph_path: Optional[str] = None,
+    depot_address: Optional[str] = None,
+    tipo_algoritmo="GenÃ©tico PyMoo",
     out_dir=None,
     rutas_dict_global=None,
     G: Optional[nx.MultiDiGraph] = None,
     mapa_dir=None,
-    depot_coords=None
+    depot_coords=None,
+    tiempo_computo_min=0.0,
 ):
     """
     1. Desempaqueta todos los resultados intra-cluster.
     2. Pasa los bloques (rutas) a una flota fija mediante orden Greedy (Prioridad de Salida).
-    3. Genera un reporte Markdown global agrupado por vehículo.
+    3. Genera un reporte Markdown global agrupado por vehÃ­culo.
     """
     if out_dir is None:
         base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         out_dir = os.path.join(base_dir, 'resultados', 'rutas')
+    os.makedirs(out_dir, exist_ok=True)
+    algo_slug = tipo_algoritmo.lower().replace(" ", "")
+    if not run_id:
+        run_id = datetime.datetime.utcnow().strftime("run-%Y%m%d-%H%M%S")
+    suffix = f"_{run_id}"
         
-    # 1. Recolección de Sub-Rutas
+    # 1. RecolecciÃ³n de Sub-Rutas
     todos_bloques = []
     detalle_nodos_global = {}
     
@@ -97,7 +115,7 @@ def asignar_y_reportar(
         dist_total_global += float(dict_out.get("dist_total_m", 0.0))
         costo_total_global += float(dict_out.get("costo_total", 0.0))
         
-        # Conteo métricas soft constraints
+        # Conteo mÃ©tricas soft constraints
         for d in nodos_dict.values():
             if d.get("t_espera_min", 0) > 0:
                 espera_total_global += d["t_espera_min"]
@@ -113,8 +131,8 @@ def asignar_y_reportar(
             if bloque.t_retorno > t_fin_global:
                 t_fin_global = bloque.t_retorno
                 
-    # 2. Ordenamiento Temporal Puro (Earliest Departure First)
-    todos_bloques.sort(key=lambda b: (b.t_salida, b.t_retorno))
+    # 2. Ordenamiento FFD (First Fit Decreasing) por duraciÃ³n de la ruta (Mayor a Menor)
+    todos_bloques.sort(key=lambda b: (b.t_retorno - b.t_salida), reverse=True)
     
     # 3. Empaquetamiento en Flota Fija
     flota = [VehiculoGlobal(v_id) for v_id in range(1, max_vehiculos + 1)]
@@ -129,10 +147,10 @@ def asignar_y_reportar(
                 break
         
         if not asignado:
-            # Si superamos la capacidad global instalada, registramos como huérfano (necesita camión extra / Tercerizado)
+            # Si superamos la capacidad global instalada, registramos como huÃ©rfano (necesita camiÃ³n extra / Tercerizado)
             bloques_huerfanos.append(b)
             
-    # 4. Construcción de DataFrames para exportación CSV
+    # 4. ConstrucciÃ³n de DataFrames para exportaciÃ³n CSV
     def min_a_hora(minutos: float) -> str:
         h = int(minutos) // 60
         m = int(minutos) % 60
@@ -176,28 +194,29 @@ def asignar_y_reportar(
         for b in vehiculo.bloques:
             d_coords_str = f"({depot_coords[0]:.4f}, {depot_coords[1]:.4f})" if depot_coords else "(-33.4489, -70.6693)"
             
-            # Fila de salida del depósito
+            # Fila de salida del depÃ³sito
             filas_detalle.append({
                 "Vehiculo_Fisico": vehiculo.id_vehiculo,
                 "Secuencia": global_idx,
                 "Cluster_Visitado": b.cluster_id,
                 "Clase_K": b.subc_k,
                 "Nodo": depot_id,
-                "Direccion": "Base Depósito",
+                "Direccion": "Base DepÃ³sito",
                 "Coordenadas": d_coords_str,
                 "Distancia_Recorrida_km": 0.0,
                 "Tiempo_Viaje_min": 0.0,
                 "Hora_Llegada": min_a_hora(b.t_salida),
-                "Ventana": "—",
+                "Ventana": "â€”",
+                "Cierre_Relajado": "â€”",
                 "Inicio_Servicio": min_a_hora(b.t_salida),
-                "Tiempo_Servicio_min": "—",
-                "Vol_L": "—",
-                "Peso_kg": "—",
-                "Tiempo_Espera_min": "—",
+                "Tiempo_Servicio_min": "â€”",
+                "Vol_L": "â€”",
+                "Peso_kg": "â€”",
+                "Tiempo_Espera_min": "â€”",
                 "Violacion_Vol": 0.0,
                 "Violacion_Peso": 0.0,
-                "Violacion_Ventana_min": "—",
-                "Estado": "🚗"
+                "Violacion_Ventana_min": "â€”",
+                "Estado": "ðŸš—"
             })
             global_idx += 1
             
@@ -215,6 +234,7 @@ def asignar_y_reportar(
                 t_real = float(det.get("t_llegada_real", 0))
                 a_v = float(det.get("a_ventana", 0))
                 b_v = float(det.get("b_ventana", 1440))
+                b_v_rel = float(det.get("b_ventana_relaxed", b_v + 30.0))
                 t_serv_ini = float(det.get("t_inicio_servicio", 0))
                 t_serv_dur = float(det.get("t_servicio_min", 0))
                 
@@ -225,7 +245,7 @@ def asignar_y_reportar(
                 viola_v = float(det.get("t_violacion_min", 0))
                 
                 ok = det.get("cumple_ventana", True)
-                estado = "✅" if ok and espera == 0 else ("⏳" if ok else "❌")
+                estado = "âœ…" if ok and espera == 0 else ("â³" if ok else "âŒ")
                 
                 filas_detalle.append({
                     "Vehiculo_Fisico": vehiculo.id_vehiculo,
@@ -239,6 +259,7 @@ def asignar_y_reportar(
                     "Tiempo_Viaje_min": round(t_viaje, 1),
                     "Hora_Llegada": min_a_hora(t_real),
                     "Ventana": f"[{min_a_hora(a_v)}, {min_a_hora(b_v)}]",
+                    "Cierre_Relajado": min_a_hora(b_v_rel),
                     "Inicio_Servicio": min_a_hora(t_serv_ini),
                     "Tiempo_Servicio_min": round(t_serv_dur, 1),
                     "Vol_L": round(vol_l, 1),
@@ -251,7 +272,7 @@ def asignar_y_reportar(
                 })
                 global_idx += 1
             
-            # Fila de retorno al depósito
+            # Fila de retorno al depÃ³sito
             dist_ret = float(b.dc.get("dist_retorno_m", 0)) / 1000.0
             t_ret = float(b.dc.get("t_viaje_retorno_min", 0))
             d_coords_str = f"({depot_coords[0]:.4f}, {depot_coords[1]:.4f})" if depot_coords else "(-33.4489, -70.6693)"
@@ -262,29 +283,30 @@ def asignar_y_reportar(
                 "Cluster_Visitado": b.cluster_id,
                 "Clase_K": b.subc_k,
                 "Nodo": depot_id,
-                "Direccion": "Base Depósito",
+                "Direccion": "Base DepÃ³sito",
                 "Coordenadas": d_coords_str,
                 "Distancia_Recorrida_km": round(dist_ret, 2),
                 "Tiempo_Viaje_min": round(t_ret, 1),
                 "Hora_Llegada": min_a_hora(b.t_retorno),
-                "Ventana": "—",
-                "Inicio_Servicio": "—",
-                "Tiempo_Servicio_min": "—",
-                "Vol_L": "—",
-                "Peso_kg": "—",
-                "Tiempo_Espera_min": "—",
+                "Ventana": "â€”",
+                "Cierre_Relajado": "â€”",
+                "Inicio_Servicio": "â€”",
+                "Tiempo_Servicio_min": "â€”",
+                "Vol_L": "â€”",
+                "Peso_kg": "â€”",
+                "Tiempo_Espera_min": "â€”",
                 "Violacion_Vol": 0.0,
                 "Violacion_Peso": 0.0,
-                "Violacion_Ventana_min": "—",
-                "Estado": "🏠"
+                "Violacion_Ventana_min": "â€”",
+                "Estado": "ðŸ "
             })
             global_idx += 1
     
     df_detalle = pd.DataFrame(filas_detalle)
     
-    # === Exportación a 2 CSVs ===
-    csv_resumen = os.path.join(out_dir, f'resumen_camiones_{tipo_algoritmo.lower().replace(" ", "")}_{fecha_target}.csv')
-    csv_detalle = os.path.join(out_dir, f'detalle_paradas_{tipo_algoritmo.lower().replace(" ", "")}_{fecha_target}.csv')
+    # === ExportaciÃ³n a 2 CSVs ===
+    csv_resumen = os.path.join(out_dir, f"resumen_camiones_{algo_slug}_{fecha_target}{suffix}.csv")
+    csv_detalle = os.path.join(out_dir, f"detalle_paradas_{algo_slug}_{fecha_target}{suffix}.csv")
     
     df_resumen.to_csv(csv_resumen, index=False, encoding='utf-8-sig')
     df_detalle.to_csv(csv_detalle, index=False, encoding='utf-8-sig')
@@ -301,11 +323,11 @@ def asignar_y_reportar(
     entregas_a_tiempo = sum(1 for d in detalle_nodos_global.values() if d.get("cumple_ventana", True))
     pct_entregas_a_tiempo = (entregas_a_tiempo / total_clientes * 100) if total_clientes > 0 else 0
     
-    # Tardanza promedio (solo nodos con violación)
+    # Tardanza promedio (solo nodos con violaciÃ³n)
     tardanzas = [d.get("t_violacion_min", 0) for d in detalle_nodos_global.values() if d.get("t_violacion_min", 0) > 0]
     tardanza_promedio = sum(tardanzas) / len(tardanzas) if tardanzas else 0.0
     
-    # Tiempo total en ruta (horas) — suma de tiempos efectivos de todos los bloques
+    # Tiempo total en ruta (horas) â€” suma de tiempos efectivos de todos los bloques
     tiempo_total_ruta_min = 0.0
     viaje_efectivo_total = 0.0
     servicio_total = 0.0
@@ -338,7 +360,7 @@ def asignar_y_reportar(
     pct_util_peso = (peso_total_cargado / cap_peso_total) * 100
     pct_util_promedio = (pct_util_vol + pct_util_peso) / 2.0
     
-    # Desviación media de carga (kg)
+    # DesviaciÃ³n media de carga (kg)
     cargas_por_turno_kg = []
     for vehiculo in flota:
         for b in vehiculo.bloques:
@@ -346,10 +368,10 @@ def asignar_y_reportar(
             cargas_por_turno_kg.append(carga_turno)
     desviacion_media_carga_kg = float(pd.Series(cargas_por_turno_kg).std()) if cargas_por_turno_kg else 0.0
     
-    # Tasa de desocupación
+    # Tasa de desocupaciÃ³n
     tasa_desocupacion = (espera_total_global / (viaje_efectivo_total + servicio_total)) * 100 if (viaje_efectivo_total + servicio_total) > 0 else 0
     
-    # Emisiones CO2 (Factor: 2.68 kg CO2/litro diesel, rendimiento 6.5 km/litro para camión urbano)
+    # Emisiones CO2 (Factor: 2.68 kg CO2/litro diesel, rendimiento 6.5 km/litro para camiÃ³n urbano)
     rendimiento_km_por_litro = 6.5
     factor_co2_kg_por_litro = 2.68 if rendimiento_km_por_litro > 0 else 0
     dist_total_km = dist_total_global / 1000.0
@@ -357,46 +379,56 @@ def asignar_y_reportar(
     co2_total_kg = litros_consumidos * factor_co2_kg_por_litro
     co2_por_pedido_kg = co2_total_kg / total_clientes if total_clientes > 0 else 0
     
-    # Pedidos no atendidos (backlog) — outliers del clustering que no entraron
+    # Pedidos no atendidos (backlog) â€” outliers del clustering que no entraron
     total_pedidos_input = len(df_filtro[df_filtro['id_nodo'] != depot_id]) if 'id_nodo' in df_filtro.columns else len(df_filtro)
     pedidos_no_atendidos = total_pedidos_input - total_clientes
     pct_backlog = (pedidos_no_atendidos / total_pedidos_input * 100) if total_pedidos_input > 0 else 0
     
-    # Función objetivo compuesta
-    penalizacion_espera = espera_total_global  # Se reporta sin multiplicar por alpha (valor crudo)
+    # FunciÃ³n objetivo compuesta
+    alpha_espera = 50000.0  # Mismo multiplicador usado en el algoritmo genÃ©tico
+    costo_fijo_camion = 100000.0  # Opex por activaciÃ³n de camiÃ³n fÃ­sico
+    
     fo_costo_ruta = costo_total_global
-    fo_total = fo_costo_ruta + penalizacion_espera
+    costo_flota = vehiculos_usados * costo_fijo_camion
+    costo_espera_penalizada = espera_total_global * alpha_espera
+    
+    fo_total = fo_costo_ruta + costo_flota + costo_espera_penalizada
     
     kpis = {
         "KPI": [
-            "Función Objetivo Total",
-            "Costo de Ruta (F.O. componente transporte)",
-            "Penalización por Espera Total (min)",
+            "FunciÃ³n Objetivo Total ($)",
+            "Costos de Ruta por Transporte ($)",
+            "Costos Fijos por Uso de Flota ($)",
+            "Valor de PenalizaciÃ³n por Espera ($)",
+            "Tiempo de Espera Total (min)",
             "Distancia Total Recorrida (km)",
             "Distancia Relativa (km/pedido)",
-            "Vehículos Utilizados",
-            "Vehículos en Desuso",
+            "VehÃ­culos Utilizados",
+            "VehÃ­culos en Desuso",
             "Capacidad Flota Fija",
             "Tiempo Total en Ruta (horas)",
             "% Entregas a Tiempo",
             "Tardanza Promedio (min)",
             "% Pedidos No Atendidos (Backlog)",
             "Pedidos No Atendidos (qty)",
-            "% Utilización Promedio Capacidad Vehículos",
-            "% Utilización Volumen",
-            "% Utilización Peso",
-            "Desviación Media de Carga (kg)",
-            "Tasa de Desocupación (%)",
+            "% UtilizaciÃ³n Promedio Capacidad VehÃ­culos",
+            "% UtilizaciÃ³n Volumen",
+            "% UtilizaciÃ³n Peso",
+            "DesviaciÃ³n Media de Carga (kg)",
+            "Tasa de DesocupaciÃ³n (%)",
             "Espera Total Acumulada (min)",
             "Emisiones CO2 Totales (kg)",
             "Emisiones CO2 por Pedido (kg)",
-            "Litros Diesel Estimados"
+            "Litros Diesel Estimados",
+            "Tiempo de CÃ³mputo (min)"
 
         ],
         "Valor": [
             round(fo_total, 2),
             round(fo_costo_ruta, 2),
-            round(penalizacion_espera, 1),
+            round(costo_flota, 2),
+            round(costo_espera_penalizada, 2),
+            round(espera_total_global, 1),
             round(dist_total_km, 2),
             round(dist_total_km / total_clientes, 2) if total_clientes > 0 else 0,
             vehiculos_usados,
@@ -415,17 +447,18 @@ def asignar_y_reportar(
             round(espera_total_global, 1),
             round(co2_total_kg, 2),
             round(co2_por_pedido_kg, 3),
-            round(litros_consumidos, 2)
+            round(litros_consumidos, 2),
+            round(tiempo_computo_min, 2)
         ]
     }
     
     df_kpis = pd.DataFrame(kpis)
-    csv_kpis = os.path.join(out_dir, f'kpis_{tipo_algoritmo.lower().replace(" ", "")}_{fecha_target}.csv')
+    csv_kpis = os.path.join(out_dir, f"kpis_{algo_slug}_{fecha_target}{suffix}.csv")
     df_kpis.to_csv(csv_kpis, index=False, encoding='utf-8-sig')
     print(f"[Gestor Flota] KPIs guardados en: {csv_kpis}")
     
     # === CSV 4: Clientes Atendidos ===
-    # Construir mapeo inverso nodo → cluster desde los resultados de optimización
+    # Construir mapeo inverso nodo â†’ cluster desde los resultados de optimizaciÃ³n
     nodo_a_cluster = {}
     for cluster_id, dict_out in resultados_clusters.items():
         for ruta in dict_out.get("rutas", []):
@@ -446,7 +479,7 @@ def asignar_y_reportar(
         # Cluster desde el mapeo inverso de resultados
         cluster_asignado = nodo_a_cluster.get(id_nodo, 'Sin Cluster (Outlier)')
         
-        atendido = "Sí" if id_nodo in nodos_atendidos else "No"
+        atendido = "SÃ­" if id_nodo in nodos_atendidos else "No"
         
         filas_clientes.append({
             "id_nodo": id_nodo,
@@ -458,16 +491,17 @@ def asignar_y_reportar(
         })
     
     df_clientes = pd.DataFrame(filas_clientes)
-    csv_clientes = os.path.join(out_dir, f'clientes_atendidos_{tipo_algoritmo.lower().replace(" ", "")}_{fecha_target}.csv')
+    csv_clientes = os.path.join(out_dir, f"clientes_atendidos_{algo_slug}_{fecha_target}{suffix}.csv")
     df_clientes.to_csv(csv_clientes, index=False, encoding='utf-8-sig')
     print(f"[Gestor Flota] Clientes atendidos guardado en: {csv_clientes}")
     
+    mapa_file = None
     if G is not None and rutas_dict_global is not None:
         if mapa_dir is None:
             mapa_dir = os.path.join(os.path.dirname(out_dir), 'mapa_rutas')
             os.makedirs(mapa_dir, exist_ok=True)
             
-        mapa_file = os.path.join(mapa_dir, f'mapa_flotaglobal_{tipo_algoritmo.lower().replace(" ", "")}_{fecha_target}.html')
+        mapa_file = os.path.join(mapa_dir, f"mapa_flotaglobal_{algo_slug}_{fecha_target}{suffix}.html")
         plot_global_flota_interactive(
             flota=flota,
             df_global=df_filtro,
@@ -477,5 +511,96 @@ def asignar_y_reportar(
             filepath=mapa_file,
             depot_coords=depot_coords
         )
-    
+
+    coord_lookup: Dict[str, List[float]] = {}
+    if "id_nodo" in df_filtro.columns:
+        for _, row in df_filtro.iterrows():
+            try:
+                node_id = str(row.get("id_nodo", "")).strip()
+                if not node_id:
+                    continue
+                coord_lookup[node_id] = [float(row.get("latitud", 0.0)), float(row.get("longitud", 0.0))]
+            except Exception:
+                continue
+
+    route_features: List[Dict[str, Any]] = []
+    for vehiculo in flota:
+        if not vehiculo.bloques:
+            continue
+        for block_idx, b in enumerate(vehiculo.bloques):
+            stop_ids = [n for n in b.ruta if n in coord_lookup]
+            coords: List[List[float]] = []
+            if depot_coords:
+                coords.append([float(depot_coords[0]), float(depot_coords[1])])
+            coords.extend([coord_lookup[n] for n in stop_ids])
+            if depot_coords:
+                coords.append([float(depot_coords[0]), float(depot_coords[1])])
+            route_features.append(
+                {
+                    "vehicleId": f"V{int(vehiculo.id_vehiculo):03d}",
+                    "vehiclePhysicalId": int(vehiculo.id_vehiculo),
+                    "cluster": b.cluster_id,
+                    "blockIndex": int(block_idx),
+                    "turnoOperacion": b.turno_op,
+                    "subconjuntoK": b.subc_k,
+                    "stopOrderIds": stop_ids,
+                    "coordinates": coords,
+                }
+            )
+
+    geometry_payload = {
+        "runId": run_id,
+        "date": fecha_target,
+        "generatedAt": datetime.datetime.utcnow().isoformat() + "Z",
+        "depot": {
+            "id": depot_id,
+            "address": depot_address,
+            "coordinates": [float(depot_coords[0]), float(depot_coords[1])] if depot_coords else None,
+        },
+        "routes": route_features,
+    }
+    geometry_path = os.path.join(out_dir, f"route_geometry_{run_id}.json")
+    with open(geometry_path, "w", encoding="utf-8") as f_geo:
+        json.dump(geometry_payload, f_geo, ensure_ascii=False, indent=2)
+
+    metadata_payload = {
+        "runId": run_id,
+        "algorithm": tipo_algoritmo,
+        "algorithmSlug": algo_slug,
+        "date": fecha_target,
+        "createdAt": datetime.datetime.utcnow().isoformat() + "Z",
+        "depot": {
+            "id": depot_id,
+            "address": depot_address,
+            "coordinates": [float(depot_coords[0]), float(depot_coords[1])] if depot_coords else None,
+        },
+        "inputs": {
+            "sourceCsv": source_csv,
+            "graphPath": graph_path,
+            "maxVehiculos": int(max_vehiculos),
+        },
+        "configApplied": config_snapshot or {},
+        "artifacts": {
+            "kpisCsv": csv_kpis,
+            "resumenCsv": csv_resumen,
+            "detalleCsv": csv_detalle,
+            "clientesCsv": csv_clientes,
+            "mapHtml": mapa_file,
+            "routeGeometryJson": geometry_path,
+        },
+        "summary": {
+            "vehiculosUsados": int(vehiculos_usados),
+            "pedidosAtendidos": int(total_clientes),
+            "pedidosNoAtendidos": int(pedidos_no_atendidos),
+            "distanciaTotalKm": round(dist_total_km, 3),
+            "onTimePct": round(pct_entregas_a_tiempo, 3),
+            "esperaTotalMin": round(espera_total_global, 3),
+            "objetivoTotal": round(fo_total, 3),
+        },
+    }
+    metadata_path = os.path.join(out_dir, f"run_{run_id}.json")
+    with open(metadata_path, "w", encoding="utf-8") as f_meta:
+        json.dump(metadata_payload, f_meta, ensure_ascii=False, indent=2)
+
     return df_resumen, df_detalle
+

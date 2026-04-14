@@ -251,7 +251,11 @@ def tau_ij_vec(
 
     # Resultado inicializado en cero (los arcos d=0 son auto-loops)
     result = np.zeros_like(d, dtype=float)
-    mask_nonzero = (d != 0.0)
+    
+    mask_inf = np.isinf(d)
+    result[mask_inf] = np.inf
+    
+    mask_nonzero = (d != 0.0) & ~mask_inf
 
     if not np.any(mask_nonzero):
         return result
